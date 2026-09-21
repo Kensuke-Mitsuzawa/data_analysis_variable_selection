@@ -92,11 +92,17 @@ export_markdown = true
         res_rep = runner.invoke(app, ["generate-report", "--config", config_path])
         assert res_rep.exit_code == 0, f"Generate-report failed: {res_rep.stdout}"
 
-        # Check excel and markdown deliverables
+        # Check excel, markdown, and log deliverables
         path_excel = os.path.join(output_dir, "analysis_report.xlsx")
         path_md = os.path.join(output_dir, "report.md")
+        path_log = os.path.join(output_dir, "log", "pipeline_run.log")
         assert os.path.exists(path_excel)
         assert os.path.exists(path_md)
+        assert os.path.exists(path_log)
+        with open(path_log, "r", encoding="utf-8") as f_log:
+            log_text = f_log.read()
+            assert len(log_text) > 0
+        # end with
 
         with open(path_md, "r") as f_md:
             md_content = f_md.read()

@@ -9,7 +9,6 @@ Usage:
     python cli.py generate-report --config config.toml
     python cli.py run-all --config config.toml
 """
-import sys
 from data_analysis_variable_selection.cli.main import app
 
 if __name__ == "__main__":

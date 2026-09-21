@@ -20,6 +20,14 @@ class ProjectConfig(BaseModel):
         default="ames_housing",
         description="Target dataset identifier: 'ames_housing' or 'speed_dating'."
     )
+    directory_name_log: str = Field(
+        default="log",
+        description="Directory name for logs."
+    )
+    file_name_log: str = Field(
+        default="pipeline_run.log",
+        description="Filename for logs."
+    )
 
     @field_validator("output_directory")
     @classmethod
@@ -147,6 +155,22 @@ class MMDAlgorithmConfig(BaseModel):
         default=0.5,
         description="Selection frequency threshold to retain stable features in mmd_cv."
     )
+    use_fused_kernel: bool = Field(
+        default=False,
+        description="Whether to use fused Triton CUDA kernel when running on GPU."
+    )
+    is_use_local_dask_cluster: bool = Field(
+        default=False,
+        description="Whether to spin up a local concurrent Dask cluster for distributed MMD computation."
+    )
+    dask_scheduler_host: ty.Optional[str] = Field(
+        default=None,
+        description="Host address of external Dask scheduler if using distributed cluster."
+    )
+    dask_scheduler_port: int = Field(
+        default=8786,
+        description="Port of external Dask scheduler."
+    )
 # end class MMDAlgorithmConfig
 
 
@@ -230,6 +254,13 @@ class PipelineCliConfig(BaseModel):
         """Returns path to cached preprocessed features container (.npz)."""
         return str(Path(self.project.output_directory) / "preprocessed_features.npz")
         # end def get_features_container_path
+
+    def get_log_file_path(self) -> str:
+        """Returns resolved path to the log file in project.output_directory / directory_name_log / file_name_log."""
+        dir_log = Path(self.project.output_directory) / self.project.directory_name_log
+        dir_log.mkdir(parents=True, exist_ok=True)
+        return str(dir_log / self.project.file_name_log)
+        # end def get_log_file_path
 # end class PipelineCliConfig
 
 

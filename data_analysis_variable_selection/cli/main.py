@@ -25,6 +25,35 @@ from ..export.report_synthesizer import ReportSynthesizer
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("cui_pipeline")
 
+
+def configure_pipeline_logging(cfg: PipelineCliConfig) -> None:
+    """Configures root logging to emit messages to both sys.stderr and the configured log file."""
+    log_file_path = cfg.get_log_file_path()
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    # Avoid duplicate handlers if called multiple times
+    for handler in list(root_logger.handlers):
+        root_logger.removeHandler(handler)
+    # end for
+
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+    # Stderr handler
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(logging.INFO)
+    stderr_handler.setFormatter(formatter)
+    root_logger.addHandler(stderr_handler)
+
+    # File handler
+    file_handler = logging.FileHandler(log_file_path, mode="a", encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+# end def configure_pipeline_logging
+
+
 app = typer.Typer(
     name="cui_pipeline",
     help="Command-line user interface for Two-Sample Variable Selection & Analysis Pipeline.",
@@ -38,6 +67,7 @@ def cmd_setup(
 ) -> None:
     """Setup datasets: download and uncompress raw files as specified in TOML config."""
     cfg = load_toml_config(config)
+    configure_pipeline_logging(cfg)
     os.makedirs(cfg.project.output_directory, exist_ok=True)
     handler = DatasetSetupHandler()
     raw_path = handler.setup_dataset(cfg)
@@ -51,6 +81,7 @@ def cmd_preprocess(
 ) -> None:
     """Preprocess data: transform features, save human-readable table in DuckDB, and cache array container."""
     cfg = load_toml_config(config)
+    configure_pipeline_logging(cfg)
     os.makedirs(cfg.project.output_directory, exist_ok=True)
 
     dataset_name = cfg.project.dataset_name.lower().strip()
@@ -92,9 +123,11 @@ def cmd_variable_detection(
 ) -> None:
     """Execute variable selection (MMD or 1D-Wasserstein) and persist anchor variables."""
     cfg = load_toml_config(config)
+    configure_pipeline_logging(cfg)
 
     # Load preprocessed container
     npz_path = cfg.get_features_container_path()
+    logger.info("loading dataset.")
     if os.path.exists(npz_path):
         container = TwoSampleDataContainer.load_from_npz(npz_path)
     else:
@@ -102,13 +135,18 @@ def cmd_variable_detection(
         container = db.fetch_preprocessed_features()
         db.close_connection_database()
     # end if
+    logger.info(f"loading dataset. {container.sample_matrix_x.shape}, {container.sample_matrix_y.shape}, {len(container.name_features)}")
 
     # Standardize
+    logger.info("Standardizing dataset.")
     scaler = ZScoreFeatureScaler()
     scaled = scaler.scale_features_zscore(container)
+    logger.info("Standardizing dataset. Done.")
 
+    logger.info("Executing variable detection.")
     method = cfg.variable_detection.method.lower().strip()
     if method == "mmd":
+        logger.info("Using MMD method.")
         mmd_cfg = MMDSelectionConfig(
             algorithm=cfg.variable_detection.mmd.algorithm,
             device=cfg.variable_detection.mmd.device,
@@ -121,9 +159,14 @@ def cmd_variable_detection(
             threshold_weights=cfg.variable_detection.mmd.threshold_weights,
             n_cv_subsampling=cfg.variable_detection.mmd.n_cv_subsampling,
             cv_stability_threshold=cfg.variable_detection.mmd.cv_stability_threshold,
+            use_fused_kernel=cfg.variable_detection.mmd.use_fused_kernel,
+            is_use_local_dask_cluster=cfg.variable_detection.mmd.is_use_local_dask_cluster,
+            dask_scheduler_host=cfg.variable_detection.mmd.dask_scheduler_host,
+            dask_scheduler_port=cfg.variable_detection.mmd.dask_scheduler_port,
         )
         selector = MMDVariableSelector(config=mmd_cfg)
     elif method == "wasserstein":
+        logger.info("Using Wasserstein method.")
         wass_cfg = WassersteinSelectionConfig(
             distributed_backend=cfg.variable_detection.wasserstein.distributed_backend,
             variable_detection_approach=cfg.variable_detection.wasserstein.variable_detection_approach,
@@ -135,12 +178,15 @@ def cmd_variable_detection(
         raise ValueError(f"Unknown variable detection method '{method}'. Use 'mmd' or 'wasserstein'.")
     # end if
 
+    logger.info("Executing variable detection.")
     result = selector.select_variables(
         sample_x=scaled.sample_matrix_x_scaled,
         sample_y=scaled.sample_matrix_y_scaled,
         names_variables=scaled.name_features,
     )
+    logger.info("Executing variable detection. Done.")
 
+    logger.info("Persisting variable detection results to DuckDB.")
     # Persist to DuckDB
     db = DuckDBStorageManager(path_database=cfg.get_database_path())
     db.initialize_database_schema()
@@ -151,6 +197,7 @@ def cmd_variable_detection(
     for name_var, weight in zip(result.names_selected, result.weights_selected):
         typer.echo(f"  - {name_var}: weight = {weight:.4f}")
     # end for
+    logger.info("Persisting variable detection results to DuckDB. Done.")
     # end def cmd_variable_detection
 
 
@@ -160,6 +207,7 @@ def cmd_variable_analysis(
 ) -> None:
     """Analyze relationships: calculate correlation/precision matrix and cluster variables."""
     cfg = load_toml_config(config)
+    configure_pipeline_logging(cfg)
 
     # Load preprocessed container and anchors from DB
     npz_path = cfg.get_features_container_path()
@@ -241,6 +289,7 @@ def cmd_generate_report(
 ) -> None:
     """Generate visual plots, multi-sheet Excel workbook, and executive Markdown report."""
     cfg = load_toml_config(config)
+    configure_pipeline_logging(cfg)
     output_dir = cfg.project.output_directory
     os.makedirs(output_dir, exist_ok=True)
 
