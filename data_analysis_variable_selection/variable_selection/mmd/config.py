@@ -81,7 +81,17 @@ class MMDSelectionConfig(BaseModel):
         description="Whether to use fused Triton CUDA kernel when running on GPU."
     )
 
+    # Random seed
+    random_seed: int = Field(
+        default=42,
+        description="Random seed for reproducible train/test splitting and subsampling in MMD selection."
+    )
+
     # Distributed / Dask options
+    distributed_mode: ty.Optional[str] = Field(
+        default=None,
+        description="Distributed mode: 'single' or 'dask'. If None, inferred automatically based on is_use_local_dask_cluster / dask_scheduler_host."
+    )
     dask_client: ty.Optional[ty.Any] = Field(
         default=None,
         description="Optional pre-existing Dask distributed Client object."
@@ -93,6 +103,22 @@ class MMDSelectionConfig(BaseModel):
     dask_scheduler_port: int = Field(
         default=8786,
         description="Port of Dask scheduler."
+    )
+    dask_dashboard_address: ty.Optional[str] = Field(
+        default=":8787",
+        description="Dask dashboard address."
+    )
+    dask_n_workers: int = Field(
+        default=4,
+        description="Number of Dask workers when using local Dask cluster."
+    )
+    dask_threads_per_worker: int = Field(
+        default=2,
+        description="Number of threads per Dask worker."
+    )
+    dask_memory_limit: ty.Optional[ty.Union[str, int]] = Field(
+        default=0,
+        description="Memory limit per Dask worker (0 or string like '4GB')."
     )
     is_use_local_dask_cluster: bool = Field(
         default=False,

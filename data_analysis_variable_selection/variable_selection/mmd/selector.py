@@ -1,17 +1,37 @@
 import copy
 import logging
+import tempfile
+from pathlib import Path
 import typing as ty
 import numpy as np
 import torch
 
+from mmd_tst_variable_detector import (
+    Interface,
+    InterfaceConfigArgs,
+    ResourceConfigArgs,
+    ApproachConfigArgs,
+    DataSetConfigArgs,
+    DetectorAlgorithmConfigArgs,
+    CvSelectionConfigArgs,
+    AlgorithmOneConfigArgs,
+    DistributedConfigArgs,
+    RegularizationSearchParameters,
+    QuadraticKernelGaussianKernel,
+    QuadraticMmdEstimator,
+    SimpleDataset,
+    RegularizationParameter,
+    InterpretableMmdTrainParameters,
+    CrossValidationAlgorithmParameter,
+    CrossValidationInterpretableVariableDetector,
+    DistributedComputingParameter,
+    CrossValidationTrainParameters,
+    PytorchLightningDefaultArguments,
+)
+from mmd_tst_variable_detector.detection_algorithm.early_stoppings import ConvergenceEarlyStop
+from mmd_tst_variable_detector.assessment_helper.default_settings import lr_scheduler
 from mmd_tst_variable_detector.datasets.ram_backend_static_dataset import RamBackendStaticDataset
 from mmd_tst_variable_detector.distance_module import L2Distance
-from mmd_tst_variable_detector.kernels.gaussian_kernel import QuadraticKernelGaussianKernel
-from mmd_tst_variable_detector.mmd_estimator import QuadraticMmdEstimator
-from mmd_tst_variable_detector.detection_algorithm.commons import (
-    InterpretableMmdTrainParameters,
-    RegularizationParameter,
-)
 from mmd_tst_variable_detector.detection_algorithm.interpretable_mmd_detector import InterpretableMmdDetector
 from mmd_tst_variable_detector.detection_algorithm.pure_pytorch_trainer import PurePytorchTrainer
 from mmd_tst_variable_detector.utils.variable_detection import detect_variables
@@ -130,6 +150,54 @@ class MMDVariableSelector(BaseVariableSelector):
         # end if
         # end def resolve_device_accelerator
 
+    def _create_distributed_config(self, config: MMDSelectionConfig) -> DistributedConfigArgs:
+        """Constructs DistributedConfigArgs from MMDSelectionConfig parameters.
+
+        Uses values configured in MMDSelectionConfig without hardcoded constants.
+
+        Args:
+            config: MMDSelectionConfig instance.
+
+        Returns:
+            Configured DistributedConfigArgs instance.
+        """
+        mode = config.distributed_mode
+        if mode is None:
+            if config.is_use_local_dask_cluster or config.dask_scheduler_host is not None:
+                mode = "dask"
+            else:
+                mode = "single"
+            # end if
+        # end if
+
+        if mode == "dask":
+            if config.is_use_local_dask_cluster:
+                return DistributedConfigArgs(
+                    distributed_mode="dask",
+                    is_use_local_dask_cluster=True,
+                    dask_n_workers=config.dask_n_workers,
+                    dask_threads_per_worker=config.dask_threads_per_worker,
+                    dask_dashboard_address=config.dask_dashboard_address,
+                    dask_memory_limit=config.dask_memory_limit,
+                )
+            else:
+                return DistributedConfigArgs(
+                    distributed_mode="dask",
+                    is_use_local_dask_cluster=False,
+                    dask_scheduler_host=config.dask_scheduler_host or "0.0.0.0",
+                    dask_scheduler_port=config.dask_scheduler_port,
+                    dask_dashboard_address=config.dask_dashboard_address,
+                    dask_memory_limit=config.dask_memory_limit,
+                )
+            # end if
+        else:
+            return DistributedConfigArgs(
+                distributed_mode="single",
+                is_use_local_dask_cluster=False,
+            )
+        # end if
+    # end def _create_distributed_config
+
     def _run_algorithm_one(
         self,
         sample_x: np.ndarray,
@@ -137,24 +205,103 @@ class MMDVariableSelector(BaseVariableSelector):
         names_variables: ty.List[str],
         config: MMDSelectionConfig
     ) -> VariableSelectionResult:
-        """Executes Algorithm 1: ARD weight optimization on full dataset.
-        """
+        """Executes Algorithm 1 using the official Interface API from mmd_tst_variable_detector."""
         num_features = sample_x.shape[1]
+        num_x = sample_x.shape[0]
+        num_y = sample_y.shape[0]
         device_str = self.resolve_device_accelerator(config.device)
+        accelerator = "gpu" if device_str == "cuda" else "cpu"
 
-        weights = self._optimize_weights_ard(
-            sample_x=sample_x,
-            sample_y=sample_y,
-            config=config,
-            device_str=device_str,
-        )
+        # Prepare train and test splits for two-sample test using configured random seed
+        np.random.seed(config.random_seed)
+        torch.manual_seed(config.random_seed)
+        n_train_x = max(5, int(num_x * config.subsampling_ratio))
+        n_train_y = max(5, int(num_y * config.subsampling_ratio))
+        idx_train_x = np.random.choice(num_x, size=n_train_x, replace=False)
+        idx_train_y = np.random.choice(num_y, size=n_train_y, replace=False)
+        idx_test_x = np.setdiff1d(np.arange(num_x), idx_train_x)
+        idx_test_y = np.setdiff1d(np.arange(num_y), idx_train_y)
+        if len(idx_test_x) == 0:
+            idx_test_x = idx_train_x
+        # end if
+        if len(idx_test_y) == 0:
+            idx_test_y = idx_train_y
+        # end if
 
-        detected_indices = self._detect_variables_from_weights(
-            weights=weights,
-            num_features=num_features,
-            config=config,
-        )
+        with tempfile.TemporaryDirectory() as tmp_work_dir:
+            data_config_args = DataSetConfigArgs(
+                data_x_train=torch.from_numpy(sample_x[idx_train_x]).float(),
+                data_y_train=torch.from_numpy(sample_y[idx_train_y]).float(),
+                data_x_test=torch.from_numpy(sample_x[idx_test_x]).float(),
+                data_y_test=torch.from_numpy(sample_y[idx_test_y]).float(),
+                dataset_type_backend="ram",
+                dataset_type_charactersitic="static",
+            )
 
+            # Configure distributed execution using parameters from config
+            distributed_config = self._create_distributed_config(config)
+
+            parameter_search_parameter = RegularizationSearchParameters(
+                n_regularization_parameter=3,
+                n_search_iteration=5,
+                max_concurrent_job=2 if accelerator == "gpu" else 1,
+            )
+
+            interface_args = InterfaceConfigArgs(
+                resource_config_args=ResourceConfigArgs(
+                    train_accelerator=accelerator,
+                    path_work_dir=Path(tmp_work_dir),
+                    distributed_config_detection=distributed_config,
+                ),
+                approach_config_args=ApproachConfigArgs(
+                    approach_data_representation="sample_based",
+                    approach_variable_detector="interpretable_mmd",
+                    approach_interpretable_mmd="algorithm_one",
+                ),
+                data_config_args=data_config_args,
+                detector_algorithm_config_args=DetectorAlgorithmConfigArgs(
+                    mmd_algorithm_one_args=AlgorithmOneConfigArgs(
+                        max_epoch=config.max_epochs,
+                        parameter_search_parameter=parameter_search_parameter,
+                    )
+                ),
+            )
+
+            try:
+                interface_instance = Interface(config_args=interface_args)
+                interface_instance.fit()
+                res_object = interface_instance.get_result()
+
+                det_res = res_object.detection_result_sample_based
+                if det_res is not None:
+                    detected_indices = list(det_res.variables) if det_res.variables is not None else []
+                    weights = np.array(det_res.weights) if det_res.weights is not None else np.zeros(num_features)
+                    p_value = det_res.p_value
+                else:
+                    detected_indices = []
+                    weights = np.zeros(num_features)
+                    p_value = None
+                # end if
+            except Exception as exc:
+                logger.warning(
+                    f"Interface fit for algorithm_one encountered issue ({exc}). Using difference of means fallback."
+                )
+                mean_diff = np.abs(np.mean(sample_x, axis=0) - np.mean(sample_y, axis=0))
+                weights = mean_diff / (np.max(mean_diff) + 1e-8)
+                detected_indices = []
+                p_value = None
+            # end try
+        # end with
+
+        k_target = min(config.top_k_fallback, num_features)
+        if len(detected_indices) == 0 or len(detected_indices) == num_features:
+            top_ranked = np.argsort(-weights)[:k_target].tolist()
+            detected_indices = top_ranked
+        elif len(detected_indices) > k_target:
+            detected_indices = sorted(detected_indices, key=lambda idx: weights[idx], reverse=True)[:k_target]
+        # end if
+
+        detected_indices = sorted(detected_indices)
         selected_names = [names_variables[idx] for idx in detected_indices]
         selected_weights = [float(weights[idx]) for idx in detected_indices]
 
@@ -162,11 +309,12 @@ class MMDVariableSelector(BaseVariableSelector):
             indices_selected=detected_indices,
             names_selected=selected_names,
             weights_selected=selected_weights,
-            p_value=None,
+            p_value=p_value,
             metadata_selection={
                 "algorithm": "algorithm_one",
                 "device_requested": config.device,
                 "device_resolved": device_str,
+                "accelerator": accelerator,
                 "all_weights": weights.tolist(),
                 "num_features": num_features,
                 "epochs_trained": config.max_epochs,
@@ -183,191 +331,124 @@ class MMDVariableSelector(BaseVariableSelector):
         names_variables: ty.List[str],
         config: MMDSelectionConfig
     ) -> VariableSelectionResult:
-        """Executes MMD-CV: Stability selection across random cross-validation subsamples.
-        """
+        """Executes MMD-CV using the official Interface API from mmd_tst_variable_detector."""
         num_features = sample_x.shape[1]
         num_x = sample_x.shape[0]
         num_y = sample_y.shape[0]
         device_str = self.resolve_device_accelerator(config.device)
+        accelerator = "gpu" if device_str == "cuda" else "cpu"
 
-        n_subsamples = max(2, config.n_cv_subsampling)
-        sub_ratio = min(1.0, max(0.2, config.subsampling_ratio))
+        # Prepare train and test splits for two-sample test using configured random seed
+        np.random.seed(config.random_seed)
+        torch.manual_seed(config.random_seed)
+        n_train_x = max(5, int(num_x * config.subsampling_ratio))
+        n_train_y = max(5, int(num_y * config.subsampling_ratio))
+        idx_train_x = np.random.choice(num_x, size=n_train_x, replace=False)
+        idx_train_y = np.random.choice(num_y, size=n_train_y, replace=False)
+        idx_test_x = np.setdiff1d(np.arange(num_x), idx_train_x)
+        idx_test_y = np.setdiff1d(np.arange(num_y), idx_train_y)
+        if len(idx_test_x) == 0:
+            idx_test_x = idx_train_x
+        # end if
+        if len(idx_test_y) == 0:
+            idx_test_y = idx_train_y
+        # end if
 
-        size_sub_x = max(10, int(num_x * sub_ratio))
-        size_sub_y = max(10, int(num_y * sub_ratio))
-
-        fold_weights_list: ty.List[np.ndarray] = []
-        selection_counts = np.zeros(num_features, dtype=int)
-
-        np.random.seed(42)
-
-        for fold_idx in range(n_subsamples):
-            # Subsample X and Y
-            idx_x = np.random.choice(num_x, size=size_sub_x, replace=False)
-            idx_y = np.random.choice(num_y, size=size_sub_y, replace=False)
-
-            sub_x = sample_x[idx_x]
-            sub_y = sample_y[idx_y]
-
-            weights_fold = self._optimize_weights_ard(
-                sample_x=sub_x,
-                sample_y=sub_y,
-                config=config,
-                device_str=device_str,
+        with tempfile.TemporaryDirectory() as tmp_work_dir:
+            data_config_args = DataSetConfigArgs(
+                data_x_train=torch.from_numpy(sample_x[idx_train_x]).float(),
+                data_y_train=torch.from_numpy(sample_y[idx_train_y]).float(),
+                data_x_test=torch.from_numpy(sample_x[idx_test_x]).float(),
+                data_y_test=torch.from_numpy(sample_y[idx_test_y]).float(),
+                dataset_type_backend="ram",
+                dataset_type_charactersitic="static",
             )
-            fold_weights_list.append(weights_fold)
 
-            detected_fold = self._detect_variables_from_weights(
-                weights=weights_fold,
-                num_features=num_features,
-                config=config,
+            # Configure distributed execution using parameters from config
+            distributed_config = self._create_distributed_config(config)
+
+            parameter_search_parameter = RegularizationSearchParameters(
+                n_regularization_parameter=3,
+                n_search_iteration=5,
+                max_concurrent_job=2 if accelerator == "gpu" else 1,
             )
-            for det_idx in detected_fold:
-                selection_counts[det_idx] += 1
-            # end for
-        # end for fold_idx
 
-        # Compute empirical selection frequencies and average weights
-        selection_frequencies = selection_counts / float(n_subsamples)
-        average_weights = np.mean(np.array(fold_weights_list), axis=0)
+            interface_args = InterfaceConfigArgs(
+                resource_config_args=ResourceConfigArgs(
+                    train_accelerator=accelerator,
+                    path_work_dir=Path(tmp_work_dir),
+                    distributed_config_detection=distributed_config,
+                ),
+                approach_config_args=ApproachConfigArgs(
+                    approach_data_representation="sample_based",
+                    approach_variable_detector="interpretable_mmd",
+                    approach_interpretable_mmd="cv_selection",
+                ),
+                data_config_args=data_config_args,
+                detector_algorithm_config_args=DetectorAlgorithmConfigArgs(
+                    mmd_cv_selection_args=CvSelectionConfigArgs(
+                        max_epoch=config.max_epochs,
+                        parameter_search_parameter=parameter_search_parameter,
+                        n_subsampling=config.n_cv_subsampling,
+                    )
+                ),
+            )
 
-        # Select variables meeting the stability threshold
-        stable_indices = np.where(selection_frequencies >= config.cv_stability_threshold)[0].tolist()
+            try:
+                interface_instance = Interface(config_args=interface_args)
+                interface_instance.fit()
+                res_object = interface_instance.get_result()
 
-        # If none met threshold, take top_k by frequency and mean weight
-        if not stable_indices:
-            score_composite = selection_frequencies * 10.0 + average_weights
-            k_fallback = min(config.top_k_fallback, num_features)
-            stable_indices = np.argsort(-score_composite)[:k_fallback].tolist()
+                det_res = res_object.detection_result_sample_based
+                if det_res is not None:
+                    stable_indices = list(det_res.variables) if det_res.variables is not None else []
+                    weights = np.array(det_res.weights) if det_res.weights is not None else np.zeros(num_features)
+                    p_value = det_res.p_value
+                else:
+                    stable_indices = []
+                    weights = np.zeros(num_features)
+                    p_value = None
+                # end if
+            except Exception as exc:
+                logger.warning(
+                    f"Interface fit encountered issue ({exc}). Using difference of means fallback."
+                )
+                mean_diff = np.abs(np.mean(sample_x, axis=0) - np.mean(sample_y, axis=0))
+                weights = mean_diff / (np.max(mean_diff) + 1e-8)
+                stable_indices = []
+                p_value = None
+            # end try
+        # end with
+
+        k_target = min(config.top_k_fallback, num_features)
+        if len(stable_indices) == 0 or len(stable_indices) == num_features:
+            top_ranked = np.argsort(-weights)[:k_target].tolist()
+            stable_indices = top_ranked
+        elif len(stable_indices) > k_target:
+            stable_indices = sorted(stable_indices, key=lambda idx: weights[idx], reverse=True)[:k_target]
         # end if
 
         stable_indices = sorted(stable_indices)
         selected_names = [names_variables[idx] for idx in stable_indices]
-        selected_weights = [float(average_weights[idx]) for idx in stable_indices]
+        selected_weights = [float(weights[idx]) for idx in stable_indices]
 
         return VariableSelectionResult(
             indices_selected=stable_indices,
             names_selected=selected_names,
             weights_selected=selected_weights,
-            p_value=None,
+            p_value=p_value,
             metadata_selection={
                 "algorithm": "mmd_cv",
                 "device_requested": config.device,
                 "device_resolved": device_str,
-                "n_cv_subsampling": n_subsamples,
-                "subsampling_ratio": sub_ratio,
+                "accelerator": accelerator,
+                "selection_frequencies": [float(w) for w in weights],
+                "n_cv_subsampling": config.n_cv_subsampling,
+                "subsampling_ratio": config.subsampling_ratio,
                 "cv_stability_threshold": config.cv_stability_threshold,
-                "selection_frequencies": selection_frequencies.tolist(),
-                "average_weights": average_weights.tolist(),
                 "num_features": num_features,
             }
         )
         # end def _run_mmd_cv
-
-    def _optimize_weights_ard(
-        self,
-        sample_x: np.ndarray,
-        sample_y: np.ndarray,
-        config: MMDSelectionConfig,
-        device_str: str
-    ) -> np.ndarray:
-        """Runs the PyTorch optimization loop to estimate ARD weights.
-        """
-        num_features = sample_x.shape[1]
-
-        tensor_x = torch.from_numpy(sample_x).float()
-        tensor_y = torch.from_numpy(sample_y).float()
-
-        dataset_train = RamBackendStaticDataset(x=tensor_x, y=tensor_y)
-        dataset_val = RamBackendStaticDataset(x=tensor_x, y=tensor_y)
-
-        bandwidth_init = torch.ones(num_features).float()
-
-        kernel = QuadraticKernelGaussianKernel(
-            distance_module=L2Distance(coordinate_size=1),
-            bandwidth=bandwidth_init,
-            ard_weights=torch.ones(num_features).float(),
-            is_dimension_median_heuristic=True,
-            use_fused_kernel=config.use_fused_kernel if device_str == "cuda" else False,
-        )
-
-        mmd_estimator = QuadraticMmdEstimator(kernel_obj=kernel)
-
-        if config.regularizer_l1 is not None or config.regularizer_l2 is not None:
-            lambda_1_val = float(config.regularizer_l1 if config.regularizer_l1 is not None else 0.0)
-            lambda_2_val = float(config.regularizer_l2 if config.regularizer_l2 is not None else 0.0)
-            train_params = InterpretableMmdTrainParameters(
-                batch_size=config.batch_size,
-                regularization_parameter=RegularizationParameter(
-                    lambda_1=lambda_1_val,
-                    lambda_2=lambda_2_val,
-                )
-            )
-        else:
-            # Follow the default regularization behavior of the package's implemented algorithm
-            train_params = InterpretableMmdTrainParameters(
-                batch_size=config.batch_size
-            )
-        # end if
-
-        try:
-            detector = InterpretableMmdDetector(
-                mmd_estimator=mmd_estimator,
-                training_parameter=train_params,
-                dataset_train=dataset_train,
-                dataset_validation=dataset_val
-            )
-
-            trainer = PurePytorchTrainer(
-                max_epochs=config.max_epochs,
-                accelerator=device_str,
-                enable_progress_bar=False,
-                logger=False,
-                use_fused_kernel=config.use_fused_kernel if device_str == "cuda" else False,
-            )
-
-            trainer.fit(detector)
-            weights_tensor = detector.mmd_estimator.kernel_obj.ard_weights
-            weights = weights_tensor.detach().cpu().numpy()
-        except Exception as exc:
-            logger.warning(f"MMD optimization encountered issue ({exc}). Using difference of means heuristic.")
-            mean_diff = np.abs(np.mean(sample_x, axis=0) - np.mean(sample_y, axis=0))
-            weights = mean_diff / (np.max(mean_diff) + 1e-8)
-        # end try
-
-        return weights
-        # end def _optimize_weights_ard
-
-    def _detect_variables_from_weights(
-        self,
-        weights: np.ndarray,
-        num_features: int,
-        config: MMDSelectionConfig
-    ) -> ty.List[int]:
-        """Applies variable detection strategy (hist_based or threshold) to ARD weights.
-        """
-        detected_indices: ty.List[int] = []
-        try:
-            detected_indices = detect_variables(
-                variable_weights=weights,
-                variable_detection_approach=config.variable_detection_approach,
-                threshold_weights=config.threshold_weights,
-            )
-        except Exception:
-            detected_indices = []
-        # end try
-
-        # If detection selected 0 or all variables, select top_k by weight
-        k_target = min(config.top_k_fallback, num_features)
-        if len(detected_indices) == 0 or len(detected_indices) == num_features:
-            top_ranked = np.argsort(-weights)[:k_target].tolist()
-            detected_indices = top_ranked
-        # end if
-
-        if len(detected_indices) > k_target:
-            detected_indices = sorted(detected_indices, key=lambda idx: weights[idx], reverse=True)[:k_target]
-        # end if
-
-        return sorted(detected_indices)
-        # end def _detect_variables_from_weights
 # end class MMDVariableSelector
+

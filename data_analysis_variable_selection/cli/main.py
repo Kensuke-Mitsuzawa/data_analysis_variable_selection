@@ -36,6 +36,10 @@ def configure_pipeline_logging(cfg: PipelineCliConfig) -> None:
     # Avoid duplicate handlers if called multiple times
     for handler in list(root_logger.handlers):
         root_logger.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:
+            pass
     # end for
 
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -158,11 +162,18 @@ def cmd_variable_detection(
             variable_detection_approach=cfg.variable_detection.mmd.variable_detection_approach,
             threshold_weights=cfg.variable_detection.mmd.threshold_weights,
             n_cv_subsampling=cfg.variable_detection.mmd.n_cv_subsampling,
+            subsampling_ratio=cfg.variable_detection.mmd.subsampling_ratio,
             cv_stability_threshold=cfg.variable_detection.mmd.cv_stability_threshold,
             use_fused_kernel=cfg.variable_detection.mmd.use_fused_kernel,
+            random_seed=cfg.variable_detection.mmd.random_seed,
+            distributed_mode=cfg.variable_detection.mmd.distributed_mode,
             is_use_local_dask_cluster=cfg.variable_detection.mmd.is_use_local_dask_cluster,
             dask_scheduler_host=cfg.variable_detection.mmd.dask_scheduler_host,
             dask_scheduler_port=cfg.variable_detection.mmd.dask_scheduler_port,
+            dask_dashboard_address=cfg.variable_detection.mmd.dask_dashboard_address,
+            dask_n_workers=cfg.variable_detection.mmd.dask_n_workers,
+            dask_threads_per_worker=cfg.variable_detection.mmd.dask_threads_per_worker,
+            dask_memory_limit=cfg.variable_detection.mmd.dask_memory_limit,
         )
         selector = MMDVariableSelector(config=mmd_cfg)
     elif method == "wasserstein":

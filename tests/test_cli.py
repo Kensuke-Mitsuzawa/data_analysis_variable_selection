@@ -1,4 +1,5 @@
 import os
+import logging
 import tempfile
 import pytest
 from typer.testing import CliRunner
@@ -7,6 +8,23 @@ from data_analysis_variable_selection.cli.main import app
 from data_analysis_variable_selection.database.manager import DuckDBStorageManager
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def clean_logging_handlers():
+    yield
+    root_logger = logging.getLogger()
+    for handler in list(root_logger.handlers):
+        if isinstance(handler, logging.FileHandler):
+            root_logger.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception:
+                pass
+            # end try
+        # end if
+    # end for
+# end def clean_logging_handlers
 
 
 def test_cli_step_by_step_mmd():

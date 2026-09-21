@@ -88,3 +88,56 @@ def test_mmd_cv_execution():
     assert result.metadata_selection["device_resolved"] == "cpu"
     assert "selection_frequencies" in result.metadata_selection
     assert len(result.metadata_selection["selection_frequencies"]) == d
+
+
+def test_mmd_distributed_config_customization():
+    config = MMDSelectionConfig(
+        random_seed=123,
+        is_use_local_dask_cluster=True,
+        dask_n_workers=8,
+        dask_threads_per_worker=3,
+        dask_dashboard_address=":9999",
+        dask_memory_limit="2GB",
+    )
+    selector = MMDVariableSelector(config=config)
+    dist_cfg = selector._create_distributed_config(config)
+
+    assert dist_cfg.distributed_mode == "dask"
+    assert dist_cfg.is_use_local_dask_cluster is True
+    assert dist_cfg.dask_n_workers == 8
+    assert dist_cfg.dask_threads_per_worker == 3
+    assert dist_cfg.dask_dashboard_address == ":9999"
+    assert dist_cfg.dask_memory_limit == "2GB"
+    assert config.random_seed == 123
+
+
+def test_mmd_toml_config_parsing(tmp_path):
+    import os
+    from data_analysis_variable_selection.cli.cli_config import load_toml_config
+
+    toml_path = os.path.join(tmp_path, "test_distributed.toml")
+    toml_content = f"""
+[project]
+output_directory = "{tmp_path}"
+database_file = "test.duckdb"
+
+[variable_detection.mmd]
+algorithm = "mmd_cv"
+random_seed = 99
+is_use_local_dask_cluster = true
+dask_n_workers = 6
+dask_threads_per_worker = 1
+dask_memory_limit = "4GB"
+"""
+    with open(toml_path, "w") as f:
+        f.write(toml_content)
+
+    cfg = load_toml_config(toml_path)
+    mmd_cfg = cfg.variable_detection.mmd
+
+    assert mmd_cfg.random_seed == 99
+    assert mmd_cfg.is_use_local_dask_cluster is True
+    assert mmd_cfg.dask_n_workers == 6
+    assert mmd_cfg.dask_threads_per_worker == 1
+    assert mmd_cfg.dask_memory_limit == "4GB"
+
