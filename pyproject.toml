@@ -1,0 +1,32 @@
+[project]
+name = "data_analysis_variable_selection"
+version = "0.1"
+description = "Data Analysis Variable Selection"
+readme = "README.md"
+authors = [
+    { name = "Kensuke Mitsuzawa", email = "kensuke.mit@gmail.com" }
+]
+requires-python = ">=3.9"
+dependencies = [
+    "mmd-tst-variable-detector",
+]
+
+[project.optional-dependencies]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-resource-path>=1.4.1",
+    "typeguard>=4.4.4",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["data_analysis_variable_selection*"]
+
+[tool.uv.sources]
+mmd-tst-variable-detector = { git = "https://github.com/Kensuke-Mitsuzawa/mmd-two-sample-test-variable-selection", rev = "1.6.2" }
