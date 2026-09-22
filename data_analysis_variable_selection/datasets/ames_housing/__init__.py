@@ -6,6 +6,7 @@ from .cleaner import AmesHousingDataCleaner
 from .encoder import AmesHousingFeatureEncoder
 from .splitter import AmesHousingTemporalSplitter
 from .preprocessor import AmesHousingPreprocessor
+from .report_generator import AmesHousingReportGenerator
 
 __all__ = [
     "AmesPreprocessingConfig",
@@ -14,4 +15,5 @@ __all__ = [
     "AmesHousingFeatureEncoder",
     "AmesHousingTemporalSplitter",
     "AmesHousingPreprocessor",
+    "AmesHousingReportGenerator",
 ]

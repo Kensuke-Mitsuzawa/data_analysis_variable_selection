@@ -256,6 +256,14 @@ class ReportConfig(BaseModel):
     export_excel: bool = Field(default=True, description="Whether to export multi-sheet Excel workbook.")
     export_plots: bool = Field(default=True, description="Whether to generate visual charts.")
     export_markdown: bool = Field(default=True, description="Whether to generate Markdown report summary.")
+    export_dataset_report: bool = Field(
+        default=True,
+        description="Whether to export dataset-specific exploratory report with shallow-level statistics."
+    )
+    dataset_report_title: ty.Optional[str] = Field(
+        default=None,
+        description="Optional title for the dataset-specific report."
+    )
 # end class ReportConfig
 
 

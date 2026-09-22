@@ -63,8 +63,11 @@ python cli.py variable-detection --config config_ames_housing.toml
 # 4. Analyze correlation/precision matrix, cluster features, and extract prototypes
 python cli.py variable-analysis --config config_ames_housing.toml
 
-# 5. Generate Excel workbook (.xlsx), Markdown report (report.md), and visual plots
+# 5. Generate reports: dataset exploratory report, pipeline analysis report, Excel workbooks, and visual plots
 python cli.py generate-report --config config_ames_housing.toml
+
+# (Optional) Generate only dataset-specific exploratory report
+python cli.py generate-dataset-report --config config_ames_housing.toml
 ```
 
 To see all available commands and flags:
@@ -79,7 +82,9 @@ python cli.py --help
 
 When the pipeline finishes, the following artifacts are generated in the configured `output_directory`:
 
-- `report.md`: Executive Markdown summary linking all findings and embedded charts.
+- `dataset_report.md`: Dataset-specific exploratory report with shallow-level statistics, domain metrics, missingness, and baseline distribution shifts ($X$ vs $Y$).
+- `dataset_report.xlsx`: Multi-sheet Excel workbook with dataset-specific distributions, financial/physical metrics, quality ratings, and Domain NA absence rates.
+- `report.md`: Executive analysis pipeline report synthesizing anchor variables ($\hat{S}$), thematic clusters ($S_\text{tilde}$), and prototype exemplars.
 - `analysis_report.xlsx`: Multi-sheet Excel workbook containing Anchor Variables, Cluster Themes, Pairwise Correlations, and Exemplar Prototypes.
 - `constellation_network.png`: Force-directed graph showing relationships among variables.
 - `tornado_cluster_*.png`: Horizontal bar charts ranking top features per cluster.

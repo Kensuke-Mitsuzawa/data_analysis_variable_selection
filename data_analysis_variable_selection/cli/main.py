@@ -7,8 +7,10 @@ import numpy as np
 
 from .cli_config import PipelineCliConfig, load_toml_config
 from ..datasets.setup_handler import DatasetSetupHandler
+from ..datasets.base_report_generator import BaseDatasetReportGenerator
 from ..datasets.ames_housing.config import AmesPreprocessingConfig
 from ..datasets.ames_housing.preprocessor import AmesHousingPreprocessor
+from ..datasets.ames_housing.report_generator import AmesHousingReportGenerator
 from ..common.models import TwoSampleDataContainer, VariableSelectionResult, CorrelationResult, VariableClusteringResult, PrototypeSampleResult
 from ..common.scaler import ZScoreFeatureScaler
 from ..variable_selection.mmd.config import MMDSelectionConfig
@@ -294,11 +296,27 @@ def cmd_variable_analysis(
     # end def cmd_variable_analysis
 
 
+def _get_dataset_report_generator(cfg: PipelineCliConfig) -> BaseDatasetReportGenerator:
+    """Instantiates the dataset-specific report generator based on configuration."""
+    dataset_name = cfg.project.dataset_name.lower().strip()
+    if dataset_name == "ames_housing":
+        ames_cfg = AmesPreprocessingConfig(
+            path_data_file=cfg.dataset.ames_housing.raw_data_path,
+            max_records_per_distribution=cfg.dataset.ames_housing.max_records_per_distribution,
+            random_seed_sampling=cfg.dataset.ames_housing.random_seed_sampling,
+        )
+        return AmesHousingReportGenerator(config=ames_cfg)
+    else:
+        raise ValueError(f"Dataset '{dataset_name}' does not have a dataset report generator implemented.")
+    # end if
+    # end def _get_dataset_report_generator
+
+
 @app.command("generate-report")
 def cmd_generate_report(
     config: str = typer.Option("config.toml", "--config", "-c", help="Path to TOML configuration file.")
 ) -> None:
-    """Generate visual plots, multi-sheet Excel workbook, and executive Markdown report."""
+    """Generate visual plots, multi-sheet Excel workbooks, and executive reports (dataset-specific and analysis pipeline)."""
     cfg = load_toml_config(config)
     configure_pipeline_logging(cfg)
     output_dir = cfg.project.output_directory
@@ -381,6 +399,31 @@ def cmd_generate_report(
         typer.echo(f"✓ Generated visual network, tornado, and radar charts in: {output_dir}")
     # end if
 
+    # 1. Dataset-specific Report (Exploratory & Shallow Statistics)
+    path_dataset_md: ty.Optional[str] = None
+    if cfg.report.export_dataset_report:
+        try:
+            generator = _get_dataset_report_generator(cfg)
+            dataset_title = cfg.report.dataset_report_title or f"{cfg.project.dataset_name.replace('_', ' ').title()} Dataset Exploratory Report"
+            raw_path = cfg.dataset.ames_housing.raw_data_path if cfg.project.dataset_name == "ames_housing" else None
+            artifacts_dataset = generator.generate_dataset_report(
+                directory_output=output_dir,
+                path_raw_data=raw_path,
+                title_report=dataset_title,
+                export_excel=cfg.report.export_excel,
+            )
+            path_dataset_md = artifacts_dataset.path_report_markdown
+            typer.echo(f"✓ Generated dataset-specific Markdown report at: {path_dataset_md}")
+            if artifacts_dataset.path_report_excel:
+                typer.echo(f"✓ Generated dataset-specific Excel workbook at: {artifacts_dataset.path_report_excel}")
+            # end if
+        except Exception as err:
+            logger.warning(f"Could not generate dataset-specific report: {err}")
+            typer.echo(f"⚠ Skipping dataset report: {err}")
+        # end try
+    # end if
+
+    # 2. Analysis Pipeline Report (Statistical Engine, MMD, Clusters, Prototypes)
     synthesizer = ReportSynthesizer()
 
     if cfg.report.export_excel:
@@ -396,12 +439,39 @@ def cmd_generate_report(
             path_output_markdown=path_md,
             title_report=cfg.report.report_title,
             dict_artifacts=dict_artifacts,
+            path_dataset_report=path_dataset_md,
         )
         typer.echo(f"✓ Generated executive Markdown report at: {path_md}")
     # end if
 
     db.close_connection_database()
     # end def cmd_generate_report
+
+
+@app.command("generate-dataset-report")
+def cmd_generate_dataset_report(
+    config: str = typer.Option("config.toml", "--config", "-c", help="Path to TOML configuration file.")
+) -> None:
+    """Generate dataset-specific exploratory report with shallow-level statistics."""
+    cfg = load_toml_config(config)
+    configure_pipeline_logging(cfg)
+    output_dir = cfg.project.output_directory
+    os.makedirs(output_dir, exist_ok=True)
+
+    generator = _get_dataset_report_generator(cfg)
+    dataset_title = cfg.report.dataset_report_title or f"{cfg.project.dataset_name.replace('_', ' ').title()} Dataset Exploratory Report"
+    raw_path = cfg.dataset.ames_housing.raw_data_path if cfg.project.dataset_name == "ames_housing" else None
+    artifacts_dataset = generator.generate_dataset_report(
+        directory_output=output_dir,
+        path_raw_data=raw_path,
+        title_report=dataset_title,
+        export_excel=cfg.report.export_excel,
+    )
+    typer.echo(f"✓ Generated dataset-specific Markdown report at: {artifacts_dataset.path_report_markdown}")
+    if artifacts_dataset.path_report_excel:
+        typer.echo(f"✓ Generated dataset-specific Excel workbook at: {artifacts_dataset.path_report_excel}")
+    # end if
+    # end def cmd_generate_dataset_report
 
 
 @app.command("run-all")

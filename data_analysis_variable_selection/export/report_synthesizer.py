@@ -2,16 +2,35 @@ import json
 import logging
 import os
 import typing as ty
+import jinja2
 import pandas as pd
 
 from ..database.manager import DuckDBStorageManager
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_BASE_REPORT_TEMPLATE_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "template_report",
+    "base_report.md"
+)
+
 
 class ReportSynthesizer:
-    """Synthesizes comprehensive analytical reports into multi-sheet Excel workbooks and Markdown documents.
+    """Synthesizes comprehensive analytical reports into multi-sheet Excel workbooks and Markdown documents via templates.
     """
+
+    def __init__(
+        self,
+        path_template_markdown: ty.Optional[str] = None
+    ):
+        """Initializes the report synthesizer.
+
+        Args:
+            path_template_markdown: Optional path to template Markdown file with placeholders.
+        """
+        self.path_template_markdown = path_template_markdown or DEFAULT_BASE_REPORT_TEMPLATE_PATH
+        # end def __init__
 
     def generate_excel_workbook(
         self,
@@ -51,14 +70,18 @@ class ReportSynthesizer:
         path_output_markdown: str,
         title_report: str = "Two-Sample Variable Selection Analysis Report",
         dict_artifacts: ty.Optional[ty.Dict[str, ty.Any]] = None,
+        path_dataset_report: ty.Optional[str] = None,
+        path_template_markdown: ty.Optional[str] = None,
     ) -> str:
-        """Synthesizes a structured Markdown executive report with tables and embedded visualizations.
+        """Synthesizes a structured Markdown executive report by substituting placeholders into the template.
 
         Args:
             db_manager: Connected DuckDBStorageManager.
             path_output_markdown: Destination filepath for report.md.
             title_report: Display title for the report.
             dict_artifacts: Optional mapping of visual artifact paths.
+            path_dataset_report: Optional file path or relative link to dataset-specific report.
+            path_template_markdown: Optional custom template Markdown file path.
 
         Returns:
             Path to generated Markdown report.
@@ -69,109 +92,262 @@ class ReportSynthesizer:
         df_clust = db_manager.fetch_records_sql("SELECT * FROM analysis_variable_clustering ORDER BY id_cluster, score_related DESC")
         df_proto = db_manager.fetch_records_sql("SELECT * FROM analysis_representative_samples ORDER BY type_subspace, distance_score ASC")
 
+        # 1. Prepare component content strings
+        summary_note = self.render_summary_note(path_dataset_report=path_dataset_report)
+        table_anchors = self.render_table_anchor_variables(df_sel=df_sel)
+        table_clust = self.render_table_cluster_themes(df_clust=df_clust)
+        table_proto = self.render_table_representative_prototypes(df_proto=df_proto)
+        section_vis = self.render_section_visualizations(dict_artifacts=dict_artifacts)
+
+        dict_context = {
+            "title_report": title_report,
+            "summary_note": summary_note,
+            "table_anchor_variables": table_anchors,
+            "table_cluster_themes": table_clust,
+            "table_representative_prototypes": table_proto,
+            "section_visualizations": section_vis,
+        }
+
+        # 2. Load template
+        target_template_path = path_template_markdown or self.path_template_markdown
+        content_template = self._load_template_content(path_template=target_template_path)
+
+        # 3. Render template with Jinja2 (fallback to replace)
+        content_rendered = self._render_template_with_context(
+            content_template=content_template,
+            dict_context=dict_context
+        )
+
+        with open(path_output_markdown, "w", encoding="utf-8") as f_out:
+            f_out.write(content_rendered)
+        # end with
+
+        logger.info(f"Markdown report generated from template at: {path_output_markdown}")
+        return path_output_markdown
+        # end def generate_markdown_report
+
+    def render_summary_note(
+        self,
+        path_dataset_report: ty.Optional[str] = None
+    ) -> str:
+        """Renders the executive summary block with optional companion dataset link.
+
+        Args:
+            path_dataset_report: Optional file path or link to dataset report.
+
+        Returns:
+            Markdown quote block string.
+        """
+        summary_note = (
+            "> **Executive Summary**: This report summarizes the statistical discrepancy drivers discovered "
+            "between sample distribution $X$ and distribution $Y$. Anchor variables ($\\hat{S}$) isolate the "
+            "intrinsic coordinates of change, while clustering ($S_\\text{tilde}$) reveals broader thematic patterns."
+        )
+        if path_dataset_report:
+            ref_link = os.path.basename(path_dataset_report)
+            summary_note += (
+                f"\n>\n> *Note: For shallow exploratory statistics, domain-specific metrics, and baseline distributions, "
+                f"refer to the companion [{ref_link}]({ref_link}).*"
+            )
+        # end if
+        return summary_note
+        # end def render_summary_note
+
+    def render_table_anchor_variables(
+        self,
+        df_sel: pd.DataFrame
+    ) -> str:
+        """Formats discovered anchor variables into a Markdown table.
+
+        Args:
+            df_sel: DataFrame containing selection records.
+
+        Returns:
+            Markdown table string.
+        """
+        if df_sel.empty:
+            return "*No anchor variables discovered.*"
+        # end if
+
         lines = [
-            f"# {title_report}",
-            "",
-            "> **Executive Summary**: This report summarizes the statistical discrepancy drivers discovered between sample distribution $X$ and distribution $Y$. Anchor variables ($\\hat{S}$) isolate the intrinsic coordinates of change, while clustering ($S_\\text{tilde}$) reveals broader thematic patterns.",
-            "",
-            "---",
-            "",
-            "## 1. Discovered Anchor Variables ($\\hat{S}$)",
-            "",
-            "Anchor variables represent the core intrinsic dimensions exhibiting maximum discrepancy between distributions:",
-            "",
             "| Variable ID | Variable Name | Discrepancy Weight |",
             "| :--- | :--- | :--- |",
         ]
-
         for _, row in df_sel.iterrows():
             lines.append(f"| {int(row['id_variable'])} | **{row['name_variable']}** | {float(row['weight']):.4f} |")
         # end for
+        return "\n".join(lines)
+        # end def render_table_anchor_variables
 
-        lines.extend([
-            "",
-            "---",
-            "",
-            "## 2. Cluster Themes & Augmented Feature Sets ($S_\\text{tilde}$)",
-            "",
-            "Features correlated with anchor variables are grouped into thematic clusters to provide business/domain interpretability:",
-            "",
+    def render_table_cluster_themes(
+        self,
+        df_clust: pd.DataFrame,
+        max_rows: int = 25
+    ) -> str:
+        """Formats clustered features into a Markdown table.
+
+        Args:
+            df_clust: DataFrame containing clustering records.
+            max_rows: Maximum records to show inline before truncation note.
+
+        Returns:
+            Markdown table string.
+        """
+        if df_clust.empty:
+            return "*No cluster records available.*"
+        # end if
+
+        lines = [
             "| Cluster ID | Feature Name | Relatedness Score |",
             "| :--- | :--- | :--- |",
-        ])
-
-        for _, row in df_clust.head(25).iterrows():
+        ]
+        for _, row in df_clust.head(max_rows).iterrows():
             score_str = f"{float(row['score_related']):.4f}" if pd.notna(row['score_related']) else "N/A"
             lines.append(
                 f"| Cluster {int(row['id_cluster'])} | **{row['name_variable']}** | {score_str} |"
             )
         # end for
 
-        if len(df_clust) > 25:
-            lines.append(f"| ... | *({len(df_clust) - 25} more records in Excel report)* | ... |")
+        if len(df_clust) > max_rows:
+            lines.append(f"| ... | *({len(df_clust) - max_rows} more records in Excel report)* | ... |")
+        # end if
+        return "\n".join(lines)
+        # end def render_table_cluster_themes
+
+    def render_table_representative_prototypes(
+        self,
+        df_proto: pd.DataFrame,
+        max_rows: int = 10
+    ) -> str:
+        """Formats representative prototype samples into a Markdown table.
+
+        Args:
+            df_proto: DataFrame containing exemplar records.
+            max_rows: Maximum rows to display.
+
+        Returns:
+            Markdown table string.
+        """
+        if df_proto.empty:
+            return "*No prototype exemplars available.*"
         # end if
 
-        lines.extend([
-            "",
-            "---",
-            "",
-            "## 3. Representative Prototype Exemplars",
-            "",
-            "Prototypical samples representing the central density of each distribution in the discrepancy subspace:",
-            "",
+        lines = [
             "| Sample ID | True Label | Prototype Role | Subspace | Discrepancy / Distance Score |",
             "| :--- | :--- | :--- | :--- | :--- |",
-        ])
-
-        for _, row in df_proto.head(10).iterrows():
+        ]
+        for _, row in df_proto.head(max_rows).iterrows():
             lines.append(
                 f"| #{int(row['id_sample'])} | {row['label_class']} | {row['is_prototype_for']} | {row['type_subspace']} | {float(row['distance_score']):.4f} |"
             )
         # end for
+        return "\n".join(lines)
+        # end def render_table_representative_prototypes
 
-        if dict_artifacts:
-            lines.extend([
-                "",
-                "---",
-                "",
-                "## 4. Visualizations Gallery",
-                "",
-            ])
-            if "constellation_network" in dict_artifacts:
-                rel_path = os.path.basename(dict_artifacts["constellation_network"])
-                lines.extend([
-                    "### Constellation Network Graph",
-                    f"![Constellation Network]({rel_path})",
-                    "",
-                ])
-            # end if
+    def render_section_visualizations(
+        self,
+        dict_artifacts: ty.Optional[ty.Dict[str, ty.Any]] = None
+    ) -> str:
+        """Formats the visualization image gallery markdown section.
 
-            if "tornado_charts" in dict_artifacts:
-                lines.append("### Thematic Cluster Tornado Charts")
-                for path_tornado in dict_artifacts["tornado_charts"]:
-                    rel_path = os.path.basename(path_tornado)
-                    lines.append(f"![Tornado Chart]({rel_path})")
-                    lines.append("")
-                # end for
-            # end if
+        Args:
+            dict_artifacts: Mapping of artifact identifiers to file paths.
 
-            if "persona_radar_charts" in dict_artifacts:
-                lines.append("### Persona Comparison Radar Charts")
-                for path_radar in dict_artifacts["persona_radar_charts"]:
-                    rel_path = os.path.basename(path_radar)
-                    lines.append(f"![Radar Chart]({rel_path})")
-                    lines.append("")
-                # end for
-            # end if
+        Returns:
+            Markdown section string.
+        """
+        if not dict_artifacts:
+            return ""
         # end if
 
-        content_md = "\n".join(lines) + "\n"
+        lines: ty.List[str] = [
+            "---",
+            "",
+            "## 4. Visualizations Gallery",
+            "",
+        ]
 
-        with open(path_output_markdown, "w", encoding="utf-8") as f_out:
-            f_out.write(content_md)
-        # end with
+        if "constellation_network" in dict_artifacts:
+            rel_path = os.path.basename(dict_artifacts["constellation_network"])
+            lines.extend([
+                "### Constellation Network Graph",
+                f"![Constellation Network]({rel_path})",
+                "",
+            ])
+        # end if
 
-        logger.info(f"Markdown report generated at: {path_output_markdown}")
-        return path_output_markdown
-        # end def generate_markdown_report
+        if "tornado_charts" in dict_artifacts:
+            lines.append("### Thematic Cluster Tornado Charts")
+            for path_tornado in dict_artifacts["tornado_charts"]:
+                rel_path = os.path.basename(path_tornado)
+                lines.append(f"![Tornado Chart]({rel_path})")
+                lines.append("")
+            # end for
+        # end if
+
+        if "persona_radar_charts" in dict_artifacts:
+            lines.append("### Persona Comparison Radar Charts")
+            for path_radar in dict_artifacts["persona_radar_charts"]:
+                rel_path = os.path.basename(path_radar)
+                lines.append(f"![Radar Chart]({rel_path})")
+                lines.append("")
+            # end for
+        # end if
+
+        return "\n".join(lines)
+        # end def render_section_visualizations
+
+    def _load_template_content(
+        self,
+        path_template: str
+    ) -> str:
+        """Loads template text from disk or falls back to built-in default if missing."""
+        if os.path.exists(path_template):
+            with open(path_template, "r", encoding="utf-8") as f_tpl:
+                content = f_tpl.read()
+                if content.strip():
+                    return content
+                # end if
+            # end with
+        # end if
+
+        # Fallback default template
+        logger.warning(f"Template not found or empty at: {path_template}. Using built-in default.")
+        return (
+            "# {{ title_report }}\n\n"
+            "{{ summary_note }}\n\n"
+            "---\n\n"
+            "## 1. Discovered Anchor Variables ($\\hat{S}$)\n\n"
+            "Anchor variables represent the core intrinsic dimensions exhibiting maximum discrepancy between distributions:\n\n"
+            "{{ table_anchor_variables }}\n\n"
+            "---\n\n"
+            "## 2. Cluster Themes & Augmented Feature Sets ($S_\\text{tilde}$)\n\n"
+            "Features correlated with anchor variables are grouped into thematic clusters to provide business/domain interpretability:\n\n"
+            "{{ table_cluster_themes }}\n\n"
+            "---\n\n"
+            "## 3. Representative Prototype Exemplars\n\n"
+            "Prototypical samples representing the central density of each distribution in the discrepancy subspace:\n\n"
+            "{{ table_representative_prototypes }}\n\n"
+            "{{ section_visualizations }}\n"
+        )
+        # end def _load_template_content
+
+    def _render_template_with_context(
+        self,
+        content_template: str,
+        dict_context: ty.Dict[str, ty.Any]
+    ) -> str:
+        """Renders the template with the provided context variables using Jinja2."""
+        try:
+            template = jinja2.Template(content_template)
+            return template.render(**dict_context)
+        except Exception as err:
+            logger.warning(f"Jinja2 rendering failed ({err}); falling back to standard string substitution.")
+            res = content_template
+            for key, val in dict_context.items():
+                res = res.replace(f"{{{{ {key} }}}}", str(val)).replace(f"{{{{{key}}}}}", str(val))
+            # end for
+            return res
+        # end try
+        # end def _render_template_with_context
 # end class ReportSynthesizer

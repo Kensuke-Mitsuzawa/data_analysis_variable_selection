@@ -113,9 +113,13 @@ export_markdown = true
         # Check excel, markdown, and log deliverables
         path_excel = os.path.join(output_dir, "analysis_report.xlsx")
         path_md = os.path.join(output_dir, "report.md")
+        path_dataset_md = os.path.join(output_dir, "dataset_report.md")
+        path_dataset_excel = os.path.join(output_dir, "dataset_report.xlsx")
         path_log = os.path.join(output_dir, "log", "pipeline_run.log")
         assert os.path.exists(path_excel)
         assert os.path.exists(path_md)
+        assert os.path.exists(path_dataset_md)
+        assert os.path.exists(path_dataset_excel)
         assert os.path.exists(path_log)
         with open(path_log, "r", encoding="utf-8") as f_log:
             log_text = f_log.read()
@@ -126,7 +130,48 @@ export_markdown = true
             md_content = f_md.read()
             assert "# Test Ames Analysis Report" in md_content
             assert "Discovered Anchor Variables" in md_content
+            assert "dataset_report.md" in md_content
         # end with
+
+        with open(path_dataset_md, "r") as f_ds_md:
+            ds_content = f_ds_md.read()
+            assert "Sample Partitioning & Temporal Split" in ds_content
+        # end with
+
+
+def test_cli_generate_dataset_report_standalone():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config_path = os.path.join(tmpdir, "test_config_ds.toml")
+        output_dir = os.path.join(tmpdir, "output_ds")
+
+        toml_content = f"""
+[project]
+output_directory = "{output_dir}"
+dataset_name = "ames_housing"
+
+[dataset.ames_housing]
+max_records_per_distribution = 20
+
+[report]
+export_excel = true
+"""
+        with open(config_path, "w") as f_toml:
+            f_toml.write(toml_content)
+        # end with
+
+        res_rep = runner.invoke(app, ["generate-dataset-report", "--config", config_path])
+        assert res_rep.exit_code == 0, f"Generate-dataset-report failed: {res_rep.stdout}"
+
+        path_dataset_md = os.path.join(output_dir, "dataset_report.md")
+        path_dataset_excel = os.path.join(output_dir, "dataset_report.xlsx")
+        assert os.path.exists(path_dataset_md)
+        assert os.path.exists(path_dataset_excel)
+
+        with open(path_dataset_md, "r", encoding="utf-8") as f:
+            content = f.read()
+            assert "Ames Housing" in content
+        # end with
+    # end with
 
 
 def test_cli_run_all_wasserstein():
