@@ -52,7 +52,8 @@ class TornadoChartPlotter:
             dict_cluster_memberships.setdefault(m.id_cluster, []).append(m)
         # end for m
 
-        for cluster_id, list_m in dict_cluster_memberships.items():
+        for cluster_id in sorted(dict_cluster_memberships.keys()):
+            list_m = dict_cluster_memberships[cluster_id]
             anchors_in_cluster = [m for m in list_m if m.id_variable in set_anchor_indices]
 
             # Only plot clusters containing at least one anchor variable

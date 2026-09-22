@@ -1,6 +1,9 @@
+from datetime import datetime, timezone
 import json
 import logging
 import os
+import re
+import subprocess
 import typing as ty
 import jinja2
 import pandas as pd
@@ -92,6 +95,35 @@ class ReportSynthesizer:
         df_clust = db_manager.fetch_records_sql("SELECT * FROM analysis_variable_clustering ORDER BY id_cluster, score_related DESC")
         df_proto = db_manager.fetch_records_sql("SELECT * FROM analysis_representative_samples ORDER BY type_subspace, distance_score ASC")
 
+        # Extract git commit and timestamp
+        report_generation_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        git_commit_id = "Unknown"
+        try:
+            git_commit_id = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                stderr=subprocess.DEVNULL
+            ).decode("utf-8").strip()
+        except Exception:
+            pass
+        # end try
+
+        # Extract dataset-specific distribution label descriptions
+        label_x_description = "Distribution X"
+        label_y_description = "Distribution Y"
+        try:
+            df_meta = db_manager.fetch_records_sql("SELECT * FROM dataset_metadata")
+            if not df_meta.empty:
+                row_json = df_meta[df_meta["key"] == "metadata_json"]
+                if not row_json.empty:
+                    meta_dict = json.loads(row_json["value"].values[0])
+                    label_x_description = meta_dict.get("label_x_description", label_x_description)
+                    label_y_description = meta_dict.get("label_y_description", label_y_description)
+                # end if
+            # end if
+        except Exception as e:
+            logger.warning(f"Could not load label descriptions from dataset_metadata: {e}")
+        # end try
+
         # 1. Prepare component content strings
         summary_note = self.render_summary_note(path_dataset_report=path_dataset_report)
         table_anchors = self.render_table_anchor_variables(df_sel=df_sel)
@@ -99,16 +131,26 @@ class ReportSynthesizer:
         table_proto = self.render_table_representative_prototypes(df_proto=df_proto)
         section_marginal = self.render_section_marginal_univariate_distributions(dict_artifacts=dict_artifacts)
         section_corr = self.render_section_variable_correlation(dict_artifacts=dict_artifacts)
+        section_constellation = self.render_section_constellation_network(dict_artifacts=dict_artifacts)
+        section_tornado = self.render_section_tornado_charts(dict_artifacts=dict_artifacts)
+        section_radar = self.render_section_persona_radar_charts(dict_artifacts=dict_artifacts)
         section_vis = self.render_section_visualizations(dict_artifacts=dict_artifacts)
 
         dict_context = {
             "title_report": title_report,
             "summary_note": summary_note,
+            "report_generation_timestamp": report_generation_timestamp,
+            "git_commit_id": git_commit_id,
+            "label_x_description": label_x_description,
+            "label_y_description": label_y_description,
             "table_anchor_variables": table_anchors,
             "section_marginal_univariate_distributions": section_marginal,
             "section_variable_correlation": section_corr,
+            "section_constellation_network": section_constellation,
             "table_cluster_themes": table_clust,
+            "section_tornado_charts": section_tornado,
             "table_representative_prototypes": table_proto,
+            "section_persona_radar_charts": section_radar,
             "section_visualizations": section_vis,
         }
 
@@ -189,7 +231,7 @@ class ReportSynthesizer:
         df_sel: ty.Optional[pd.DataFrame] = None,
         top_k_per_cluster: int = 5
     ) -> str:
-        """Formats clustered features into a Markdown table grouped by cluster-id, top-5 per cluster.
+        """Formats clustered features into Markdown tables separated per cluster ID.
 
         Filters out records where the Relatedness Score is NA / None.
         Identifies whether each feature was discovered by Variable Selection (anchor)
@@ -201,7 +243,7 @@ class ReportSynthesizer:
             top_k_per_cluster: Maximum top augmented records shown per cluster.
 
         Returns:
-            Markdown table string.
+            Markdown formatted tables separated by cluster.
         """
         if df_clust.empty:
             return "*No cluster records available.*"
@@ -215,13 +257,9 @@ class ReportSynthesizer:
 
         set_anchor_names = set(df_sel["name_variable"].tolist()) if df_sel is not None and not df_sel.empty else set()
 
-        lines = [
-            "| Cluster ID | Feature Name | Detection Source | Relatedness Score |",
-            "| :--- | :--- | :--- | :--- |",
-        ]
-
-        # Group by cluster ID and sort by score_related descending
+        cluster_blocks: ty.List[str] = []
         clusters = sorted(df_valid["id_cluster"].unique())
+
         for cid in clusters:
             df_c = df_valid[df_valid["id_cluster"] == cid]
 
@@ -229,10 +267,17 @@ class ReportSynthesizer:
             df_anchors = df_c[df_c["name_variable"].isin(set_anchor_names)].sort_values("score_related", ascending=False)
             df_augmented = df_c[~df_c["name_variable"].isin(set_anchor_names)].sort_values("score_related", ascending=False)
 
+            lines = [
+                f"### Cluster {int(cid)}",
+                "",
+                "| Feature Name | Detection Source | Relatedness Score |",
+                "| :--- | :--- | :--- |",
+            ]
+
             # Render anchor features
             for _, row in df_anchors.iterrows():
                 lines.append(
-                    f"| Cluster {int(row['id_cluster'])} | **{row['name_variable']}** | Variable Selection | {float(row['score_related']):.4f} |"
+                    f"| **{row['name_variable']}** | Variable Selection | {float(row['score_related']):.4f} |"
                 )
             # end for
 
@@ -240,12 +285,14 @@ class ReportSynthesizer:
             df_aug_top = df_augmented.head(top_k_per_cluster)
             for _, row in df_aug_top.iterrows():
                 lines.append(
-                    f"| Cluster {int(row['id_cluster'])} | {row['name_variable']} | Variable Augmentation | {float(row['score_related']):.4f} |"
+                    f"| {row['name_variable']} | Variable Augmentation | {float(row['score_related']):.4f} |"
                 )
             # end for
+
+            cluster_blocks.append("\n".join(lines))
         # end for cid
 
-        return "\n".join(lines)
+        return "\n\n".join(cluster_blocks)
         # end def render_table_cluster_themes
 
     def render_section_marginal_univariate_distributions(
@@ -315,84 +362,131 @@ class ReportSynthesizer:
     def render_table_representative_prototypes(
         self,
         df_proto: pd.DataFrame,
-        max_rows: int = 10
+        max_rows_per_label: int = 5
     ) -> str:
-        """Formats representative prototype samples into a Markdown table.
+        """Formats representative prototype samples into Markdown tables separated by True Label (X and Y).
 
         Args:
             df_proto: DataFrame containing exemplar records.
-            max_rows: Maximum rows to display.
+            max_rows_per_label: Maximum rows to display per distribution label.
 
         Returns:
-            Markdown table string.
+            Markdown tables separated by True Label.
         """
         if df_proto.empty:
             return "*No prototype exemplars available.*"
         # end if
 
-        lines = [
-            "| Sample ID | True Label | Prototype Role | Subspace | Discrepancy / Distance Score |",
-            "| :--- | :--- | :--- | :--- | :--- |",
-        ]
-        for _, row in df_proto.head(max_rows).iterrows():
-            lines.append(
-                f"| #{int(row['id_sample'])} | {row['label_class']} | {row['is_prototype_for']} | {row['type_subspace']} | {float(row['distance_score']):.4f} |"
-            )
-        # end for
-        return "\n".join(lines)
+        label_blocks: ty.List[str] = []
+        labels = sorted(df_proto["label_class"].unique())
+
+        for label in labels:
+            df_label = df_proto[df_proto["label_class"] == label].head(max_rows_per_label)
+            lines = [
+                f"### Distribution ${label}$ Prototypes",
+                "",
+                "| Sample ID | True Label | Prototype Role | Subspace | Discrepancy / Distance Score |",
+                "| :--- | :--- | :--- | :--- | :--- |",
+            ]
+            for _, row in df_label.iterrows():
+                lines.append(
+                    f"| #{int(row['id_sample'])} | {row['label_class']} | {row['is_prototype_for']} | {row['type_subspace']} | {float(row['distance_score']):.4f} |"
+                )
+            # end for
+            label_blocks.append("\n".join(lines))
+        # end for label
+
+        return "\n\n".join(label_blocks)
         # end def render_table_representative_prototypes
+
+    def render_section_constellation_network(
+        self,
+        dict_artifacts: ty.Optional[ty.Dict[str, ty.Any]] = None
+    ) -> str:
+        """Formats the constellation network graph markdown snippet.
+
+        Args:
+            dict_artifacts: Mapping of artifact paths.
+
+        Returns:
+            Markdown image snippet or notice.
+        """
+        if not dict_artifacts or "constellation_network" not in dict_artifacts:
+            return "*Constellation network graph not available.*"
+        # end if
+        rel_path = os.path.basename(dict_artifacts["constellation_network"])
+        return f"![Constellation Network]({rel_path})"
+        # end def render_section_constellation_network
+
+    def render_section_tornado_charts(
+        self,
+        dict_artifacts: ty.Optional[ty.Dict[str, ty.Any]] = None
+    ) -> str:
+        """Formats the thematic cluster tornado charts markdown snippet.
+
+        Args:
+            dict_artifacts: Mapping of artifact paths.
+
+        Returns:
+            Markdown images snippet or notice.
+        """
+        if not dict_artifacts or "tornado_charts" not in dict_artifacts:
+            return "*Thematic cluster tornado charts not available.*"
+        # end if
+
+        def _get_cluster_num(path_str: str) -> int:
+            match = re.search(r"cluster_(\d+)", path_str)
+            return int(match.group(1)) if match else 999999
+        # end def
+
+        sorted_paths = sorted(dict_artifacts["tornado_charts"], key=_get_cluster_num)
+        lines = []
+        for path_tornado in sorted_paths:
+            rel_path = os.path.basename(path_tornado)
+            lines.append(f"![Tornado Chart]({rel_path})\n")
+        # end for
+        return "\n".join(lines).strip()
+        # end def render_section_tornado_charts
+
+    def render_section_persona_radar_charts(
+        self,
+        dict_artifacts: ty.Optional[ty.Dict[str, ty.Any]] = None
+    ) -> str:
+        """Formats the persona comparison radar charts markdown snippet.
+
+        Args:
+            dict_artifacts: Mapping of artifact paths.
+
+        Returns:
+            Markdown images snippet or notice.
+        """
+        if not dict_artifacts or "persona_radar_charts" not in dict_artifacts:
+            return "*Persona comparison radar charts not available.*"
+        # end if
+
+        def _get_cluster_num(path_str: str) -> int:
+            match = re.search(r"cluster_(\d+)", path_str)
+            return int(match.group(1)) if match else 999999
+        # end def
+
+        sorted_paths = sorted(dict_artifacts["persona_radar_charts"], key=_get_cluster_num)
+        lines = []
+        for path_radar in sorted_paths:
+            rel_path = os.path.basename(path_radar)
+            lines.append(f"![Radar Chart]({rel_path})\n")
+        # end for
+        return "\n".join(lines).strip()
+        # end def render_section_persona_radar_charts
 
     def render_section_visualizations(
         self,
         dict_artifacts: ty.Optional[ty.Dict[str, ty.Any]] = None
     ) -> str:
-        """Formats the visualization image gallery markdown section.
+        """Legacy compatibility method for visualization gallery.
 
-        Args:
-            dict_artifacts: Mapping of artifact identifiers to file paths.
-
-        Returns:
-            Markdown section string.
+        Returns empty string as visualizations are now integrated into contextual template sections.
         """
-        if not dict_artifacts:
-            return ""
-        # end if
-
-        lines: ty.List[str] = [
-            "---",
-            "",
-            "## 4. Visualizations Gallery",
-            "",
-        ]
-
-        if "constellation_network" in dict_artifacts:
-            rel_path = os.path.basename(dict_artifacts["constellation_network"])
-            lines.extend([
-                "### Constellation Network Graph",
-                f"![Constellation Network]({rel_path})",
-                "",
-            ])
-        # end if
-
-        if "tornado_charts" in dict_artifacts:
-            lines.append("### Thematic Cluster Tornado Charts")
-            for path_tornado in dict_artifacts["tornado_charts"]:
-                rel_path = os.path.basename(path_tornado)
-                lines.append(f"![Tornado Chart]({rel_path})")
-                lines.append("")
-            # end for
-        # end if
-
-        if "persona_radar_charts" in dict_artifacts:
-            lines.append("### Persona Comparison Radar Charts")
-            for path_radar in dict_artifacts["persona_radar_charts"]:
-                rel_path = os.path.basename(path_radar)
-                lines.append(f"![Radar Chart]({rel_path})")
-                lines.append("")
-            # end for
-        # end if
-
-        return "\n".join(lines)
+        return ""
         # end def render_section_visualizations
 
     def _load_template_content(

@@ -10,6 +10,7 @@ from ..common.models import (
     TwoSampleDataContainer,
     VariableSelectionResult,
 )
+from .palette import ReportVisualPalette
 
 
 class MarginalDistributionPlotter:
@@ -18,15 +19,15 @@ class MarginalDistributionPlotter:
 
     def __init__(
         self,
-        color_distribution_x: str = "#1f77b4",
-        color_distribution_y: str = "#ff7f0e",
+        color_distribution_x: str = ReportVisualPalette.COLOR_DISTRIBUTION_X,
+        color_distribution_y: str = ReportVisualPalette.COLOR_DISTRIBUTION_Y,
         alpha_fill: float = 0.4
     ):
         """Initializes the marginal distribution plotter.
 
         Args:
-            color_distribution_x: Color code for distribution X.
-            color_distribution_y: Color code for distribution Y.
+            color_distribution_x: Color code for distribution X (canonically Red).
+            color_distribution_y: Color code for distribution Y (canonically Blue).
             alpha_fill: Opacity for density area fill.
         """
         self.color_distribution_x = color_distribution_x
@@ -122,7 +123,16 @@ class MarginalDistributionPlotter:
             )
             ax.set_xlabel(f"{name_anchor} (Original Unscaled Value)", fontsize=10, labelpad=8)
             ax.set_ylabel("Frequency / Density", fontsize=10, labelpad=8)
-            ax.legend(frameon=True, facecolor="#ffffff", edgecolor="#cccccc", fontsize=9)
+            legend = ax.legend(frameon=True, facecolor="#ffffff", edgecolor="#cccccc", fontsize=9)
+            if legend:
+                for text_entry, color_entry in zip(
+                    legend.get_texts(),
+                    [self.color_distribution_x, self.color_distribution_y]
+                ):
+                    text_entry.set_color(color_entry)
+                    text_entry.set_fontweight("bold")
+                # end for
+            # end if
             ax.grid(True, linestyle="--", alpha=0.4)
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)

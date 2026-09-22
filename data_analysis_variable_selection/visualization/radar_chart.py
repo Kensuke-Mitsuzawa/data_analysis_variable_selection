@@ -10,6 +10,7 @@ from ..common.models import (
     VariableClusteringResult,
     VariableSelectionResult,
 )
+from .palette import ReportVisualPalette
 
 
 class PersonaRadarChartPlotter:
@@ -66,7 +67,8 @@ class PersonaRadarChartPlotter:
             dict_cluster_memberships.setdefault(m.id_cluster, []).append(m)
         # end for m
 
-        for cluster_id, list_m in dict_cluster_memberships.items():
+        for cluster_id in sorted(dict_cluster_memberships.keys()):
+            list_m = dict_cluster_memberships[cluster_id]
             anchors_in_cluster = [m for m in list_m if m.id_variable in set_anchor_indices]
 
             if not anchors_in_cluster:
@@ -137,13 +139,38 @@ class PersonaRadarChartPlotter:
             ax.set_ylim(0, 1.1)
             ax.grid(color="#475569", linestyle="--", alpha=0.5)
 
-            # Plot distribution X
-            ax.plot(angles, vals_x_norm, color="#38bdf8", linewidth=2.5, label="Prototype X (Pre-Crash / Matched)")
-            ax.fill(angles, vals_x_norm, color="#38bdf8", alpha=0.25)
+            color_x = ReportVisualPalette.COLOR_DISTRIBUTION_X_DARK
+            color_y = ReportVisualPalette.COLOR_DISTRIBUTION_Y_DARK
 
-            # Plot distribution Y
-            ax.plot(angles, vals_y_norm, color="#f43f5e", linewidth=2.5, label="Prototype Y (Post-Crash / Unmatched)")
-            ax.fill(angles, vals_y_norm, color="#f43f5e", alpha=0.25)
+            # Plot distribution X (Canonical Red)
+            ax.plot(
+                angles,
+                vals_x_norm,
+                color=color_x,
+                linewidth=2.5,
+                marker="o",
+                markersize=7,
+                markeredgecolor=ReportVisualPalette.COLOR_DOT_BORDER,
+                markeredgewidth=1.2,
+                label="X",
+                zorder=4,
+            )
+            ax.fill(angles, vals_x_norm, color=color_x, alpha=0.25, zorder=2)
+
+            # Plot distribution Y (Canonical Blue)
+            ax.plot(
+                angles,
+                vals_y_norm,
+                color=color_y,
+                linewidth=2.5,
+                marker="o",
+                markersize=5,
+                markeredgecolor=ReportVisualPalette.COLOR_DOT_BORDER,
+                markeredgewidth=1.0,
+                label="Y",
+                zorder=5,
+            )
+            ax.fill(angles, vals_y_norm, color=color_y, alpha=0.25, zorder=3)
 
             ax.set_title(
                 f"Persona Comparison: Cluster {cluster_id} Prototype Contrast",
@@ -152,7 +179,16 @@ class PersonaRadarChartPlotter:
                 pad=22,
                 fontweight="bold"
             )
-            ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1), facecolor="#1e293b", edgecolor="#475569", labelcolor="#f8fafc")
+            legend = ax.legend(
+                loc="upper right",
+                bbox_to_anchor=(1.3, 1.1),
+                facecolor="#1e293b",
+                edgecolor="#475569",
+            )
+            for text_entry, color_entry in zip(legend.get_texts(), [color_x, color_y]):
+                text_entry.set_color(color_entry)
+                text_entry.set_fontweight("bold")
+            # end for
 
             path_chart = os.path.join(directory_output, f"persona_radar_cluster_{cluster_id}.png")
             plt.tight_layout()
