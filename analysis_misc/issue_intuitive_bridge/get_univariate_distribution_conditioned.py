@@ -399,13 +399,13 @@ def parse_arguments_cli() -> ConditionedDistributionConfig:
     parser.add_argument(
         "--conditioning-vars",
         nargs="+",
-        default=["SaleType_New", "SaleCondition_Normal"],
+        default=["SaleType_New", "SaleCondition_Normal", "SaleCondition_Partial"],
         help="List of conditioning anchor variables (e.g. SaleType_New SaleCondition_Normal)."
     )
     parser.add_argument(
         "--target-vars",
         nargs="+",
-        default=["GrLivArea", "LotArea", "YearBuilt", "TotalBsmtSF"],
+        default=["SalePrice", "GrLivArea", "LotArea", "YearBuilt", "TotalBsmtSF"],
         help="List of target continuous/intuitive variables (e.g. GrLivArea LotArea)."
     )
     parser.add_argument(
