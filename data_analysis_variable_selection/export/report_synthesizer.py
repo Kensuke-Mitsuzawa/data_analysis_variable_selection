@@ -95,7 +95,7 @@ class ReportSynthesizer:
         # 1. Prepare component content strings
         summary_note = self.render_summary_note(path_dataset_report=path_dataset_report)
         table_anchors = self.render_table_anchor_variables(df_sel=df_sel)
-        table_clust = self.render_table_cluster_themes(df_clust=df_clust)
+        table_clust = self.render_table_cluster_themes(df_clust=df_clust, df_sel=df_sel)
         table_proto = self.render_table_representative_prototypes(df_proto=df_proto)
         section_marginal = self.render_section_marginal_univariate_distributions(dict_artifacts=dict_artifacts)
         section_corr = self.render_section_variable_correlation(dict_artifacts=dict_artifacts)
@@ -186,15 +186,19 @@ class ReportSynthesizer:
     def render_table_cluster_themes(
         self,
         df_clust: pd.DataFrame,
+        df_sel: ty.Optional[pd.DataFrame] = None,
         top_k_per_cluster: int = 5
     ) -> str:
         """Formats clustered features into a Markdown table grouped by cluster-id, top-5 per cluster.
 
         Filters out records where the Relatedness Score is NA / None.
+        Identifies whether each feature was discovered by Variable Selection (anchor)
+        or Variable Augmentation.
 
         Args:
             df_clust: DataFrame containing clustering records.
-            top_k_per_cluster: Maximum top records shown per cluster.
+            df_sel: Optional DataFrame containing variable selection records.
+            top_k_per_cluster: Maximum top augmented records shown per cluster.
 
         Returns:
             Markdown table string.
@@ -209,19 +213,34 @@ class ReportSynthesizer:
             return "*No augmented features with valid relatedness scores available.*"
         # end if
 
+        set_anchor_names = set(df_sel["name_variable"].tolist()) if df_sel is not None and not df_sel.empty else set()
+
         lines = [
-            "| Cluster ID | Feature Name | Relatedness Score |",
-            "| :--- | :--- | :--- |",
+            "| Cluster ID | Feature Name | Detection Source | Relatedness Score |",
+            "| :--- | :--- | :--- | :--- |",
         ]
 
         # Group by cluster ID and sort by score_related descending
         clusters = sorted(df_valid["id_cluster"].unique())
         for cid in clusters:
-            df_c = df_valid[df_valid["id_cluster"] == cid].sort_values("score_related", ascending=False)
-            df_top = df_c.head(top_k_per_cluster)
-            for _, row in df_top.iterrows():
+            df_c = df_valid[df_valid["id_cluster"] == cid]
+
+            # Separate anchors and augmented features within this cluster
+            df_anchors = df_c[df_c["name_variable"].isin(set_anchor_names)].sort_values("score_related", ascending=False)
+            df_augmented = df_c[~df_c["name_variable"].isin(set_anchor_names)].sort_values("score_related", ascending=False)
+
+            # Render anchor features
+            for _, row in df_anchors.iterrows():
                 lines.append(
-                    f"| Cluster {int(row['id_cluster'])} | **{row['name_variable']}** | {float(row['score_related']):.4f} |"
+                    f"| Cluster {int(row['id_cluster'])} | **{row['name_variable']}** | Variable Selection | {float(row['score_related']):.4f} |"
+                )
+            # end for
+
+            # Render top-k augmented features
+            df_aug_top = df_augmented.head(top_k_per_cluster)
+            for _, row in df_aug_top.iterrows():
+                lines.append(
+                    f"| Cluster {int(row['id_cluster'])} | {row['name_variable']} | Variable Augmentation | {float(row['score_related']):.4f} |"
                 )
             # end for
         # end for cid
