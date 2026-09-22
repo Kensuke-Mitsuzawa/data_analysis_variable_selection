@@ -244,6 +244,10 @@ class VariableAnalysisConfig(BaseModel):
         default=5,
         description="Number of thematic clusters for agglomerative clustering."
     )
+    sample_scope: str = Field(
+        default="subset",
+        description="Sample scope for variable correlation and clustering: 'subset' (default) or 'whole'. Graphical Lasso requires huge RAM as sample size increases, so 'subset' is recommended."
+    )
 # end class VariableAnalysisConfig
 
 
@@ -263,6 +267,10 @@ class ReportConfig(BaseModel):
     dataset_report_title: ty.Optional[str] = Field(
         default=None,
         description="Optional title for the dataset-specific report."
+    )
+    sample_scope: str = Field(
+        default="whole",
+        description="Sample scope for marginal distribution plots, prototype exemplars, and persona radar charts: 'whole' (default) or 'subset'."
     )
 # end class ReportConfig
 

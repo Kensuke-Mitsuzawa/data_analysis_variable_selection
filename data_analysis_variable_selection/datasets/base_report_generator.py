@@ -61,6 +61,15 @@ class DatasetReportArtifacts(BaseModel):
 # end class DatasetReportArtifacts
 
 
+class FeatureDerivationSummary(BaseModel):
+    """Lineage and derivation specification for a preprocessed feature.
+    """
+    name_feature: str = Field(description="Name of the preprocessed feature in the dataset.")
+    source_columns: ty.List[str] = Field(description="List of raw dataset column names from which the feature was derived.")
+    process_description: str = Field(description="Brief 4-5 word description explaining the transformation process.")
+# end class FeatureDerivationSummary
+
+
 class BaseDatasetReportGenerator(abc.ABC):
     """Abstract base class for dataset-specific report generators producing shallow-level exploratory reports.
     """

@@ -126,7 +126,7 @@ def test_ames_housing_report_generator_end_to_end():
         assert "GrLivArea" in md_text
         assert "OverallQual" in md_text
         assert "Neighborhood" in md_text
-        assert "Domain NAs & Amenity Absence Rates" in md_text
+        assert "Feature Derivation & Lineage Mapping" in md_text
 
         # Inspect Excel sheets
         excel_file = pd.ExcelFile(artifacts.path_report_excel)
@@ -136,11 +136,56 @@ def test_ames_housing_report_generator_end_to_end():
         assert "Quality Ratings" in sheet_names
         assert "Neighborhood Distribution" in sheet_names
         assert "Domain NAs & Missing" in sheet_names
+        assert "Feature Lineage" in sheet_names
 
         df_overview = excel_file.parse("Overview")
         assert len(df_overview) >= 5
+
+        df_lineage = excel_file.parse("Feature Lineage")
+        assert not df_lineage.empty
+        assert "Feature Name" in df_lineage.columns
+        assert "Source Column(s)" in df_lineage.columns
+        assert "Transformation Process" in df_lineage.columns
     # end with
 # end def test_ames_housing_report_generator_end_to_end
+
+
+def test_feature_derivation_summary_mapping():
+    """Verify compute_feature_derivation_summary correctly attributes source columns and 4-5 word descriptions."""
+    generator = AmesHousingReportGenerator()
+
+    # Mock raw data with representative columns
+    df_raw = pd.DataFrame({
+        "Order": [1, 2],
+        "PID": [101, 102],
+        "YrSold": [2006, 2009],
+        "MoSold": [5, 6],
+        "SalePrice": [200000.0, 250000.0],
+        "LotFrontage": [70.0, 80.0],
+        "GrLivArea": [1500.0, 1800.0],
+        "ExterQual": ["Gd", "TA"],
+        "GarageArea": [500.0, 400.0],
+        "Neighborhood": ["CollgCr", "NAmes"],
+    })
+
+    summaries = generator.compute_feature_derivation_summary(df_raw=df_raw)
+    assert len(summaries) > 0
+
+    dict_sums = {s.name_feature: s for s in summaries}
+
+    # LotFrontage has both LotFrontage and Neighborhood as sources
+    assert "LotFrontage" in dict_sums
+    assert set(dict_sums["LotFrontage"].source_columns) == {"LotFrontage", "Neighborhood"}
+    assert dict_sums["LotFrontage"].process_description == "Neighborhood median stratified imputation"
+
+    # All descriptions must be 4 to 5 words
+    for s in summaries:
+        words = s.process_description.split()
+        assert 4 <= len(words) <= 5, f"Description for {s.name_feature} has {len(words)} words: {s.process_description}"
+        assert isinstance(s.source_columns, list)
+        assert len(s.source_columns) >= 1
+    # end for
+# end def test_feature_derivation_summary_mapping
 
 
 def test_report_synthesizer_template_rendering():
@@ -215,6 +260,10 @@ def test_report_synthesizer_template_rendering():
         assert "Cluster 1" in content
         assert "#12" in content
         assert "dataset_report.md" in content
+        assert "Dataset & Analysis Scope" in content
+        assert "Number of features" in content
+        assert "N for the variable selection" in content
+        assert "N for the variable correlation analysis" in content
 
         db.close_connection_database()
     # end with

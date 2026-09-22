@@ -49,9 +49,11 @@ top_k_fallback = 5
 correlation_method = "graphical_lasso"          # "pearson" or "graphical_lasso"
 correlation_threshold = 0.2
 num_clusters = 5
+sample_scope = "subset"                         # "subset" (default) or "whole" (subset avoids Graphical Lasso RAM spikes)
 
 [report]
 report_title = "Ames Housing Variable Selection Analysis Report"
+sample_scope = "whole"                          # "whole" (default) or "subset" (runs radar, marginals, and prototypes on whole dataset)
 export_excel = true
 export_plots = true
 export_markdown = true

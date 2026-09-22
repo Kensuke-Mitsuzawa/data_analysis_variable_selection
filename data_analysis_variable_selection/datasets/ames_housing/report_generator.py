@@ -10,6 +10,7 @@ from ..base_report_generator import (
     CategoryProportionComparison,
     MissingnessSummary,
     DatasetReportArtifacts,
+    FeatureDerivationSummary,
 )
 from .config import AmesPreprocessingConfig
 from .loader import AmesHousingDataLoader
@@ -237,6 +238,25 @@ class AmesHousingReportGenerator(BaseDatasetReportGenerator):
             )
         # end for dna
 
+        # Feature Lineage Mapping
+        feature_lineage_summaries = self.compute_feature_derivation_summary(df_data)
+        lines.extend([
+            "",
+            "---",
+            "",
+            "## 7. Feature Derivation & Lineage Mapping",
+            "",
+            "Comprehensive transformation lineage mapping each preprocessed feature to its raw source columns and the engineering operation:",
+            "",
+            "| Feature Name | Source Column(s) | Transformation Process |",
+            "| :--- | :--- | :--- |",
+        ])
+
+        for s in feature_lineage_summaries:
+            src_str = f"`{s.source_columns}`"
+            lines.append(f"| **{s.name_feature}** | {src_str} | {s.process_description} |")
+        # end for s
+
         content_markdown = "\n".join(lines) + "\n"
 
         with open(path_output_markdown, "w", encoding="utf-8") as f_out:
@@ -319,6 +339,17 @@ class AmesHousingReportGenerator(BaseDatasetReportGenerator):
         )
         df_missing = pd.DataFrame([s.model_dump() for s in missingness_summaries])
 
+        # Feature Lineage Sheet
+        feature_lineage_summaries = self.compute_feature_derivation_summary(df_data)
+        df_lineage = pd.DataFrame([
+            {
+                "Feature Name": s.name_feature,
+                "Source Column(s)": ", ".join(s.source_columns),
+                "Transformation Process": s.process_description,
+            }
+            for s in feature_lineage_summaries
+        ])
+
         with pd.ExcelWriter(path_output_excel, engine="openpyxl") as writer:
             df_overview.to_excel(writer, sheet_name="Overview", index=False)
             if not df_numeric.empty:
@@ -333,11 +364,96 @@ class AmesHousingReportGenerator(BaseDatasetReportGenerator):
             if not df_missing.empty:
                 df_missing.to_excel(writer, sheet_name="Domain NAs & Missing", index=False)
             # end if
+            if not df_lineage.empty:
+                df_lineage.to_excel(writer, sheet_name="Feature Lineage", index=False)
+            # end if
         # end with
 
         logger.info(f"Ames Housing Excel report generated at: {path_output_excel}")
         return path_output_excel
         # end def generate_excel_report
+
+    def compute_feature_derivation_summary(
+        self,
+        df_raw: pd.DataFrame,
+        list_feature_names: ty.Optional[ty.List[str]] = None,
+    ) -> ty.List[FeatureDerivationSummary]:
+        """Maps preprocessed features to their source raw columns and concise 4-5 word process descriptions.
+
+        Args:
+            df_raw: Raw housing dataframe.
+            list_feature_names: Optional pre-computed feature names list.
+
+        Returns:
+            List of FeatureDerivationSummary instances.
+        """
+        if list_feature_names is None:
+            from .preprocessor import AmesHousingPreprocessor
+            preprocessor = AmesHousingPreprocessor(config=self.config)
+            container = preprocessor.prepare_two_sample_data(df_raw=df_raw)
+            feature_names = container.name_features
+        else:
+            feature_names = list_feature_names
+        # end if
+
+        raw_columns = list(df_raw.columns)
+        nominal_columns = sorted(
+            [
+                col for col in raw_columns
+                if col not in self.config.ordinal_mapping_dicts
+                and col not in self.config.columns_to_drop
+                and df_raw[col].dtype == "object"
+            ],
+            key=len,
+            reverse=True
+        )
+
+        list_summaries: ty.List[FeatureDerivationSummary] = []
+        for feat in feature_names:
+            if feat == "LotFrontage":
+                src = ["LotFrontage", "Neighborhood"]
+                desc = "Neighborhood median stratified imputation"
+            elif feat in self.config.ordinal_mapping_dicts:
+                src = [feat]
+                desc = "Monotonic integer ordinal rating mapping"
+            elif feat in self.config.continuous_na_to_zero_cols:
+                src = [feat]
+                desc = "Zero-filled physical absence continuous value"
+            elif feat in raw_columns:
+                src = [feat]
+                desc = "Direct numeric feature pass-through"
+            else:
+                matched_col = None
+                for nom_col in nominal_columns:
+                    if feat.startswith(nom_col + "_"):
+                        matched_col = nom_col
+                        break
+                    # end if
+                # end for
+                if matched_col is None:
+                    for raw_col in sorted(raw_columns, key=len, reverse=True):
+                        if feat.startswith(raw_col + "_"):
+                            matched_col = raw_col
+                            break
+                        # end if
+                    # end for
+                # end if
+
+                src = [matched_col] if matched_col else [feat]
+                desc = "One-hot binary categorical indicator"
+            # end if
+
+            list_summaries.append(
+                FeatureDerivationSummary(
+                    name_feature=feat,
+                    source_columns=src,
+                    process_description=desc
+                )
+            )
+        # end for feat
+
+        return list_summaries
+        # end def compute_feature_derivation_summary
 
     def generate_dataset_report(
         self,

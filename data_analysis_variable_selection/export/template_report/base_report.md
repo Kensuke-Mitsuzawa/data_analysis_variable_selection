@@ -9,6 +9,13 @@
 | **Distribution $X$ Label** | {{ label_x_description }} |
 | **Distribution $Y$ Label** | {{ label_y_description }} |
 
+### Dataset & Analysis Scope
+
+- **Number of features**: {{ num_features }}
+- **Number of samples**:
+  - **N for the variable selection**: {{ n_samples_variable_selection }}
+  - **N for the variable correlation analysis**: {{ n_samples_variable_correlation }}
+
 ---
 
 ## Discovered Anchor Variables ($\hat{S}$)
@@ -20,6 +27,8 @@ Anchor variables represent the core intrinsic dimensions exhibiting maximum disc
 ---
 
 ## Comparison of marginal univariate distributions
+
+> **Source Sample**: Generated from the **{{ sample_source_type }}** ({{ sample_source_detail }}).
 
 {{ section_marginal_univariate_distributions }}
 
@@ -53,11 +62,15 @@ Features correlated with anchor variables are grouped into thematic clusters to 
 
 Prototypical samples representing the central density of each distribution in the discrepancy subspace:
 
+> **Source Sample**: Extracted from the **{{ sample_source_type }}** ({{ sample_source_detail }}).
+
 {{ table_representative_prototypes }}
 
 ### Persona Comparison Radar Charts
 
 Persona radar charts contrast the multi-feature profile of the Top-1 prototypical sample of Distribution $X$ ($x^* \in X$) against the Top-1 prototypical sample of Distribution $Y$ ($y^* \in Y$) across each thematic cluster.
+
+> **Source Sample**: Contrasting Top-1 prototype exemplars derived from the **{{ sample_source_type }}** ({{ sample_source_detail }}).
 
 **Mathematical Definition & Value Interpretation**:
 For each cluster $k$ and each displayed feature $j \in \{1, \dots, p_k\}$, let $x^*_j$ and $y^*_j$ denote the unscaled feature values of the top prototype of $X$ and $Y$, respectively. The plotted coordinate values $\bar{x}_j, \bar{y}_j \in [0, 1]$ represent relative contrast scaling between the two archetypes:

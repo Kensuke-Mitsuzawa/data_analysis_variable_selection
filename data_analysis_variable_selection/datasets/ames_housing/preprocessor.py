@@ -45,6 +45,7 @@ class AmesHousingPreprocessor(BaseDatasetPreprocessor):
         self,
         path_data: ty.Optional[str] = None,
         max_records_per_distribution: ty.Optional[int] = None,
+        apply_subsampling: bool = True,
         **kwargs: ty.Any
     ) -> TwoSampleDataContainer:
         """Executes ingestion, Domain NA cleanup, neighborhood imputation, encoding, and temporal splitting.
@@ -52,6 +53,7 @@ class AmesHousingPreprocessor(BaseDatasetPreprocessor):
         Args:
             path_data: Optional file path to raw Ames CSV. If None, uses config or OpenML.
             max_records_per_distribution: Optional sample limit per distribution (overrides config if provided).
+            apply_subsampling: Whether to apply subsampling according to max_records_per_distribution (default True).
             **kwargs: Extra parameters for compatibility.
 
         Returns:
@@ -98,7 +100,7 @@ class AmesHousingPreprocessor(BaseDatasetPreprocessor):
         n_orig_x = int(matrix_x.shape[0])
         n_orig_y = int(matrix_y.shape[0])
 
-        if limit_records is not None and limit_records > 0:
+        if apply_subsampling and limit_records is not None and limit_records > 0:
             rng = np.random.RandomState(self.config.random_seed_sampling)
             if matrix_x.shape[0] > limit_records:
                 chosen_idx_x = rng.choice(matrix_x.shape[0], size=limit_records, replace=False)

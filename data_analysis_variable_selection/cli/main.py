@@ -102,7 +102,7 @@ def cmd_preprocess(
         raise ValueError(f"Dataset '{dataset_name}' not yet supported for preprocessing.")
     # end if
 
-    container = preprocessor.prepare_two_sample_data()
+    container = preprocessor.prepare_two_sample_data(apply_subsampling=False)
 
     # 1. Save human-readable table into DuckDB
     db = DuckDBStorageManager(path_database=cfg.get_database_path())
@@ -141,12 +141,30 @@ def cmd_variable_detection(
         container = db.fetch_preprocessed_features()
         db.close_connection_database()
     # end if
-    logger.info(f"loading dataset. {container.sample_matrix_x.shape}, {container.sample_matrix_y.shape}, {len(container.name_features)}")
+    logger.info(f"Loaded dataset: X shape {container.sample_matrix_x.shape}, Y shape {container.sample_matrix_y.shape}, Features {len(container.name_features)}")
+
+    # Subsample if max_records_per_distribution is configured
+    limit_records = None
+    seed = 42
+    if cfg.project.dataset_name.lower().strip() == "ames_housing":
+        limit_records = cfg.dataset.ames_housing.max_records_per_distribution
+        seed = cfg.dataset.ames_housing.random_seed_sampling
+    # end if
+
+    if limit_records is not None and limit_records > 0:
+        container_detection = container.create_subsample_container(
+            max_records_per_distribution=limit_records,
+            random_seed=seed,
+        )
+    else:
+        container_detection = container
+    # end if
+    logger.info(f"Variable detection sample: X shape {container_detection.sample_matrix_x.shape}, Y shape {container_detection.sample_matrix_y.shape}")
 
     # Standardize
     logger.info("Standardizing dataset.")
     scaler = ZScoreFeatureScaler()
-    scaled = scaler.scale_features_zscore(container)
+    scaled = scaler.scale_features_zscore(container_detection)
     logger.info("Standardizing dataset. Done.")
 
     logger.info("Executing variable detection.")
@@ -204,6 +222,19 @@ def cmd_variable_detection(
     db = DuckDBStorageManager(path_database=cfg.get_database_path())
     db.initialize_database_schema()
     db.insert_records_selection(result)
+    db.connection_db.execute(
+        "INSERT OR REPLACE INTO dataset_metadata (key, value) VALUES ('n_samples_selection_x', ?)",
+        [str(container_detection.sample_matrix_x.shape[0])]
+    )
+    db.connection_db.execute(
+        "INSERT OR REPLACE INTO dataset_metadata (key, value) VALUES ('n_samples_selection_y', ?)",
+        [str(container_detection.sample_matrix_y.shape[0])]
+    )
+    is_sub = (limit_records is not None and limit_records > 0 and (container_detection.sample_matrix_x.shape[0] < container.sample_matrix_x.shape[0]))
+    db.connection_db.execute(
+        "INSERT OR REPLACE INTO dataset_metadata (key, value) VALUES ('scope_variable_selection', ?)",
+        ["subset" if is_sub else "whole"]
+    )
     db.close_connection_database()
 
     typer.echo(f"✓ Variable detection complete ({method}). Discovered {len(result.indices_selected)} anchor variables:")
@@ -232,8 +263,30 @@ def cmd_variable_analysis(
         db.close_connection_database()
     # end if
 
+    # Determine sample scope for variable analysis (subset vs whole)
+    analysis_scope = cfg.variable_analysis.sample_scope.lower().strip()
+    limit_records = None
+    seed = 42
+    if cfg.project.dataset_name.lower().strip() == "ames_housing":
+        limit_records = cfg.dataset.ames_housing.max_records_per_distribution
+        seed = cfg.dataset.ames_housing.random_seed_sampling
+    # end if
+
+    if "sub" in analysis_scope and limit_records is not None and limit_records > 0:
+        container_analysis = container.create_subsample_container(
+            max_records_per_distribution=limit_records,
+            random_seed=seed,
+        )
+    else:
+        container_analysis = container
+    # end if
+    logger.info(
+        f"Variable analysis ({analysis_scope}) dataset: X shape {container_analysis.sample_matrix_x.shape}, "
+        f"Y shape {container_analysis.sample_matrix_y.shape}"
+    )
+
     scaler = ZScoreFeatureScaler()
-    scaled = scaler.scale_features_zscore(container)
+    scaled = scaler.scale_features_zscore(container_analysis)
 
     db = DuckDBStorageManager(path_database=cfg.get_database_path())
     df_sel = db.fetch_records_sql("SELECT id_variable, name_variable, weight FROM analysis_variable_selection")
@@ -287,10 +340,26 @@ def cmd_variable_analysis(
         list_prototype_records=proto_hat_s.list_prototype_records + proto_s_tilde.list_prototype_records
     )
     db.insert_records_prototypes(combined_prototypes)
+
+    # Update metadata in DuckDB
+    db.connection_db.execute(
+        "INSERT OR REPLACE INTO dataset_metadata (key, value) VALUES ('n_samples_analysis_x', ?)",
+        [str(container_analysis.sample_matrix_x.shape[0])]
+    )
+    db.connection_db.execute(
+        "INSERT OR REPLACE INTO dataset_metadata (key, value) VALUES ('n_samples_analysis_y', ?)",
+        [str(container_analysis.sample_matrix_y.shape[0])]
+    )
+    is_sub_analysis = (limit_records is not None and limit_records > 0 and (container_analysis.sample_matrix_x.shape[0] < container.sample_matrix_x.shape[0]))
+    db.connection_db.execute(
+        "INSERT OR REPLACE INTO dataset_metadata (key, value) VALUES ('scope_variable_analysis', ?)",
+        ["subset" if is_sub_analysis else "whole"]
+    )
     db.close_connection_database()
 
     typer.echo(
-        f"✓ Variable analysis complete. Found {len(clust_result.dict_cluster_to_variables)} variable clusters. "
+        f"✓ Variable analysis complete ({analysis_scope} scope, {container_analysis.sample_matrix_x.shape[0] + container_analysis.sample_matrix_y.shape[0]} samples). "
+        f"Found {len(clust_result.dict_cluster_to_variables)} variable clusters. "
         f"Augmented feature set (S_tilde) contains {len(clust_result.indices_augmented_s_tilde)} variables."
     )
     # end def cmd_variable_analysis
@@ -338,14 +407,33 @@ def cmd_generate_report(
     # Reconstruct data objects for artifact plotter
     npz_path = cfg.get_features_container_path()
     container = TwoSampleDataContainer.load_from_npz(npz_path) if os.path.exists(npz_path) else db.fetch_preprocessed_features()
-    scaler = ZScoreFeatureScaler()
-    scaled = scaler.scale_features_zscore(container)
 
-    matrix_pooled = np.vstack([scaled.sample_matrix_x_scaled, scaled.sample_matrix_y_scaled])
+    limit_records = None
+    seed = 42
+    if cfg.project.dataset_name.lower().strip() == "ames_housing":
+        limit_records = cfg.dataset.ames_housing.max_records_per_distribution
+        seed = cfg.dataset.ames_housing.random_seed_sampling
+    # end if
+
+    # 1. Resolve analysis container (for correlation matrix & clustering)
+    analysis_scope = cfg.variable_analysis.sample_scope.lower().strip()
+    if "sub" in analysis_scope and limit_records is not None and limit_records > 0:
+        container_analysis = container.create_subsample_container(
+            max_records_per_distribution=limit_records,
+            random_seed=seed,
+        )
+    else:
+        container_analysis = container
+    # end if
+
+    scaler = ZScoreFeatureScaler()
+    scaled_analysis = scaler.scale_features_zscore(container_analysis)
+
+    matrix_pooled = np.vstack([scaled_analysis.sample_matrix_x_scaled, scaled_analysis.sample_matrix_y_scaled])
     corr_analyzer = CorrelationAnalyzer()
     corr_result = corr_analyzer.compute_matrix_correlation(
         matrix_pooled=matrix_pooled,
-        names_variables=scaled.name_features,
+        names_variables=scaled_analysis.name_features,
         method=cfg.variable_analysis.correlation_method,
         threshold_edge=cfg.variable_analysis.correlation_threshold,
     )
@@ -354,9 +442,22 @@ def cmd_generate_report(
     clust_result = clusterer.cluster_variables_relationship(
         matrix_rel=corr_result.matrix_correlation,
         list_selected_anchors=df_sel["id_variable"].tolist(),
-        names_variables=scaled.name_features,
+        names_variables=scaled_analysis.name_features,
         num_clusters=cfg.variable_analysis.num_clusters,
     )
+
+    # 2. Resolve report container (for marginal distributions, prototype exemplars, persona radar charts)
+    report_scope = cfg.report.sample_scope.lower().strip()
+    if "sub" in report_scope and limit_records is not None and limit_records > 0:
+        container_report = container.create_subsample_container(
+            max_records_per_distribution=limit_records,
+            random_seed=seed,
+        )
+    else:
+        container_report = container
+    # end if
+
+    scaled_report = scaler.scale_features_zscore(container_report)
 
     sel_result = VariableSelectionResult(
         indices_selected=df_sel["id_variable"].tolist(),
@@ -366,23 +467,39 @@ def cmd_generate_report(
 
     extractor = PrototypeExtractor()
     proto_hat_s = extractor.extract_samples_prototype(
-        sample_x=scaled.sample_matrix_x_scaled,
-        sample_y=scaled.sample_matrix_y_scaled,
-        names_features=scaled.name_features,
+        sample_x=scaled_report.sample_matrix_x_scaled,
+        sample_y=scaled_report.sample_matrix_y_scaled,
+        names_features=scaled_report.name_features,
         list_subspace_indices=sel_result.indices_selected,
         type_subspace="hat_S",
         top_n=5,
     )
     proto_s_tilde = extractor.extract_samples_prototype(
-        sample_x=scaled.sample_matrix_x_scaled,
-        sample_y=scaled.sample_matrix_y_scaled,
-        names_features=scaled.name_features,
+        sample_x=scaled_report.sample_matrix_x_scaled,
+        sample_y=scaled_report.sample_matrix_y_scaled,
+        names_features=scaled_report.name_features,
         list_subspace_indices=clust_result.indices_augmented_s_tilde,
         type_subspace="hat_S_augmented",
         top_n=5,
     )
     combined_prototypes = PrototypeSampleResult(
         list_prototype_records=proto_hat_s.list_prototype_records + proto_s_tilde.list_prototype_records
+    )
+
+    # Update prototype records and report scope in database
+    db.insert_records_prototypes(combined_prototypes)
+    db.connection_db.execute(
+        "INSERT OR REPLACE INTO dataset_metadata (key, value) VALUES ('n_samples_report_x', ?)",
+        [str(container_report.sample_matrix_x.shape[0])]
+    )
+    db.connection_db.execute(
+        "INSERT OR REPLACE INTO dataset_metadata (key, value) VALUES ('n_samples_report_y', ?)",
+        [str(container_report.sample_matrix_y.shape[0])]
+    )
+    is_sub_report = (limit_records is not None and limit_records > 0 and (container_report.sample_matrix_x.shape[0] < container.sample_matrix_x.shape[0]))
+    db.connection_db.execute(
+        "INSERT OR REPLACE INTO dataset_metadata (key, value) VALUES ('scope_report', ?)",
+        ["subset" if is_sub_report else "whole"]
     )
 
     dict_artifacts: ty.Dict[str, ty.Any] = {}
@@ -395,7 +512,7 @@ def cmd_generate_report(
             selection_result=sel_result,
             prototype_result=combined_prototypes,
             directory_output=output_dir,
-            container=container,
+            container=container_report,
         )
         typer.echo(f"✓ Generated visual network, tornado, and radar charts in: {output_dir}")
     # end if

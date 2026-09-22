@@ -44,6 +44,62 @@ class TwoSampleDataContainer(BaseModel):
         )
         # end def load_from_npz
 
+    def create_subsample_container(
+        self,
+        max_records_per_distribution: ty.Optional[int] = None,
+        random_seed: int = 42
+    ) -> "TwoSampleDataContainer":
+        """Generates a deterministic subsampled copy of this container without mutating original data.
+
+        Args:
+            max_records_per_distribution: Maximum number of samples to retain per distribution class.
+            random_seed: Seed for reproducible random choice sampling.
+
+        Returns:
+            New TwoSampleDataContainer holding subsampled matrices and updated metadata.
+        """
+        if max_records_per_distribution is None or max_records_per_distribution <= 0:
+            return TwoSampleDataContainer(
+                sample_matrix_x=self.sample_matrix_x.copy(),
+                sample_matrix_y=self.sample_matrix_y.copy(),
+                name_features=list(self.name_features),
+                metadata_dataset=dict(self.metadata_dataset),
+            )
+        # end if
+
+        rng = np.random.RandomState(random_seed)
+        n_x = self.sample_matrix_x.shape[0]
+        n_y = self.sample_matrix_y.shape[0]
+
+        mat_x = self.sample_matrix_x
+        mat_y = self.sample_matrix_y
+
+        if n_x > max_records_per_distribution:
+            chosen_idx_x = rng.choice(n_x, size=max_records_per_distribution, replace=False)
+            mat_x = mat_x[chosen_idx_x]
+        # end if
+
+        if n_y > max_records_per_distribution:
+            chosen_idx_y = rng.choice(n_y, size=max_records_per_distribution, replace=False)
+            mat_y = mat_y[chosen_idx_y]
+        # end if
+
+        new_meta = dict(self.metadata_dataset)
+        new_meta.setdefault("n_samples_x_original", n_x)
+        new_meta.setdefault("n_samples_y_original", n_y)
+        new_meta["n_samples_x"] = int(mat_x.shape[0])
+        new_meta["n_samples_y"] = int(mat_y.shape[0])
+        new_meta["max_records_per_distribution"] = max_records_per_distribution
+        new_meta["sample_scope"] = "subset"
+
+        return TwoSampleDataContainer(
+            sample_matrix_x=mat_x.copy(),
+            sample_matrix_y=mat_y.copy(),
+            name_features=list(self.name_features),
+            metadata_dataset=new_meta,
+        )
+        # end def create_subsample_container
+
 
 class ScaledDataContainer(BaseModel):
     """Container holding standardized two-sample matrices and scaling parameters.

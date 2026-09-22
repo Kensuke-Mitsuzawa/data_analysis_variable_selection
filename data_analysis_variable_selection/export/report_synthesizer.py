@@ -107,21 +107,85 @@ class ReportSynthesizer:
             pass
         # end try
 
-        # Extract dataset-specific distribution label descriptions
+        # Extract dataset-specific distribution label descriptions and sample/feature counts
         label_x_description = "Distribution X"
         label_y_description = "Distribution Y"
+        num_features = "N/A"
+        n_samples_variable_selection = "N/A"
+        n_samples_variable_correlation = "N/A"
+        sample_source_type = "sub-sample"
+        sample_source_detail = "N/A"
+
         try:
             df_meta = db_manager.fetch_records_sql("SELECT * FROM dataset_metadata")
             if not df_meta.empty:
+                meta_rows = dict(zip(df_meta["key"], df_meta["value"]))
+                if "num_features" in meta_rows:
+                    num_features = str(meta_rows["num_features"])
+                # end if
+
+                n_x = int(meta_rows.get("n_samples_x", 0))
+                n_y = int(meta_rows.get("n_samples_y", 0))
+                n_total = n_x + n_y
+
                 row_json = df_meta[df_meta["key"] == "metadata_json"]
+                n_orig_x = None
+                n_orig_y = None
                 if not row_json.empty:
                     meta_dict = json.loads(row_json["value"].values[0])
                     label_x_description = meta_dict.get("label_x_description", label_x_description)
                     label_y_description = meta_dict.get("label_y_description", label_y_description)
+                    n_orig_x = meta_dict.get("n_samples_x_original")
+                    n_orig_y = meta_dict.get("n_samples_y_original")
+                    if "num_features" in meta_dict and num_features == "N/A":
+                        num_features = str(meta_dict["num_features"])
+                    # end if
+                # end if
+
+                if n_orig_x is None and n_x > 0:
+                    n_orig_x = n_x
+                # end if
+                if n_orig_y is None and n_y > 0:
+                    n_orig_y = n_y
+                # end if
+
+                # 1. Variable Selection Sample Count
+                sel_x = int(meta_rows.get("n_samples_selection_x", n_x))
+                sel_y = int(meta_rows.get("n_samples_selection_y", n_y))
+                sel_total = sel_x + sel_y
+                scope_sel = meta_rows.get("scope_variable_selection", "subset" if (n_orig_x and sel_x < n_orig_x) else "whole")
+                if "sub" in scope_sel and n_orig_x and n_orig_y and (sel_x < n_orig_x or sel_y < n_orig_y):
+                    n_samples_variable_selection = f"{sel_total:,} ($N_X = {sel_x:,}, N_Y = {sel_y:,}$; subsampled from population $N_X = {n_orig_x:,}, N_Y = {n_orig_y:,}$)"
+                else:
+                    n_samples_variable_selection = f"{sel_total:,} ($N_X = {sel_x:,}, N_Y = {sel_y:,}$)"
+                # end if
+
+                # 2. Variable Correlation Analysis Sample Count
+                corr_x = int(meta_rows.get("n_samples_analysis_x", sel_x))
+                corr_y = int(meta_rows.get("n_samples_analysis_y", sel_y))
+                corr_total = corr_x + corr_y
+                scope_corr = meta_rows.get("scope_variable_analysis", "subset" if (n_orig_x and corr_x < n_orig_x) else "whole")
+                if "sub" in scope_corr and n_orig_x and n_orig_y and (corr_x < n_orig_x or corr_y < n_orig_y):
+                    n_samples_variable_correlation = f"{corr_total:,} (pooled subset sample $N_X = {corr_x:,}, N_Y = {corr_y:,}$ across distributions $X$ and $Y$)"
+                else:
+                    n_samples_variable_correlation = f"{corr_total:,} (pooled whole sample $N_X = {corr_x:,}, N_Y = {corr_y:,}$ across distributions $X$ and $Y$)"
+                # end if
+
+                # 3. Report Scope (Univariate marginal distributions, prototype exemplars, persona radar charts)
+                rep_x = int(meta_rows.get("n_samples_report_x", n_orig_x or n_x))
+                rep_y = int(meta_rows.get("n_samples_report_y", n_orig_y or n_y))
+                rep_total = rep_x + rep_y
+                scope_rep = meta_rows.get("scope_report", "whole")
+                if "sub" in scope_rep and n_orig_x and n_orig_y and (rep_x < n_orig_x or rep_y < n_orig_y):
+                    sample_source_type = "sub-sample"
+                    sample_source_detail = f"$N_X = {rep_x:,}, N_Y = {rep_y:,}$, Total $N = {rep_total:,}$; subsampled from population $N_X = {n_orig_x:,}, N_Y = {n_orig_y:,}$"
+                else:
+                    sample_source_type = "whole sample"
+                    sample_source_detail = f"$N_X = {rep_x:,}, N_Y = {rep_y:,}$, Total $N = {rep_total:,}$"
                 # end if
             # end if
         except Exception as e:
-            logger.warning(f"Could not load label descriptions from dataset_metadata: {e}")
+            logger.warning(f"Could not load metadata from dataset_metadata: {e}")
         # end try
 
         # 1. Prepare component content strings
@@ -143,6 +207,11 @@ class ReportSynthesizer:
             "git_commit_id": git_commit_id,
             "label_x_description": label_x_description,
             "label_y_description": label_y_description,
+            "num_features": num_features,
+            "n_samples_variable_selection": n_samples_variable_selection,
+            "n_samples_variable_correlation": n_samples_variable_correlation,
+            "sample_source_type": sample_source_type,
+            "sample_source_detail": sample_source_detail,
             "table_anchor_variables": table_anchors,
             "section_marginal_univariate_distributions": section_marginal,
             "section_variable_correlation": section_corr,
