@@ -8,7 +8,7 @@ dataset_name = "ames_housing"
 [dataset.ames_housing]
 raw_data_path = "/root/project-data-analysis-variable-selection/data/ames_housing_raw.csv"
 url_download = "https://www.openml.org/data/get_csv/21785545/ames_housing.csv"
-max_records_per_distribution = 200
+max_records_per_distribution = 500
 random_seed_sampling = 42
 
 [variable_detection]
