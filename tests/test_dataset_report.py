@@ -219,3 +219,96 @@ def test_report_synthesizer_template_rendering():
         db.close_connection_database()
     # end with
 # end def test_report_synthesizer_template_rendering
+
+
+def test_cluster_themes_na_filtering_and_grouping():
+    """Verify render_table_cluster_themes filters NA scores and groups top-5 per cluster."""
+    from data_analysis_variable_selection.export.report_synthesizer import ReportSynthesizer
+
+    df_clust = pd.DataFrame([
+        # Cluster 0: all NAs
+        {"id_variable": 0, "name_variable": "NoAnchor1", "id_cluster": 0, "score_related": np.nan},
+        {"id_variable": 1, "name_variable": "NoAnchor2", "id_cluster": 0, "score_related": None},
+        # Cluster 1: 7 records with valid scores
+        {"id_variable": 2, "name_variable": "Feat1_1", "id_cluster": 1, "score_related": 0.95},
+        {"id_variable": 3, "name_variable": "Feat1_2", "id_cluster": 1, "score_related": 0.85},
+        {"id_variable": 4, "name_variable": "Feat1_3", "id_cluster": 1, "score_related": 0.75},
+        {"id_variable": 5, "name_variable": "Feat1_4", "id_cluster": 1, "score_related": 0.65},
+        {"id_variable": 6, "name_variable": "Feat1_5", "id_cluster": 1, "score_related": 0.55},
+        {"id_variable": 7, "name_variable": "Feat1_6_Excess", "id_cluster": 1, "score_related": 0.45},
+        {"id_variable": 8, "name_variable": "Feat1_7_Excess", "id_cluster": 1, "score_related": 0.35},
+        # Cluster 2: 2 records
+        {"id_variable": 9, "name_variable": "Feat2_1", "id_cluster": 2, "score_related": 0.88},
+        {"id_variable": 10, "name_variable": "Feat2_2", "id_cluster": 2, "score_related": 0.72},
+    ])
+
+    synthesizer = ReportSynthesizer()
+    table_md = synthesizer.render_table_cluster_themes(df_clust, top_k_per_cluster=5)
+
+    # Cluster 0 should not appear because all scores were NA
+    assert "Cluster 0" not in table_md
+    assert "NoAnchor1" not in table_md
+
+    # Cluster 1 should have top 5, not excess
+    assert "Feat1_1" in table_md
+    assert "Feat1_5" in table_md
+    assert "Feat1_6_Excess" not in table_md
+    assert "Feat1_7_Excess" not in table_md
+
+    # Cluster 2 should appear
+    assert "Cluster 2" in table_md
+    assert "Feat2_1" in table_md
+    assert "Feat2_2" in table_md
+# end def test_cluster_themes_na_filtering_and_grouping
+
+
+def test_marginal_distribution_and_heatmap_plotters():
+    """Verify MarginalDistributionPlotter and CorrelationHeatmapPlotter generate image files."""
+    from data_analysis_variable_selection.common.models import (
+        TwoSampleDataContainer,
+        VariableSelectionResult,
+        CorrelationResult,
+        CorrelationEdge,
+    )
+    from data_analysis_variable_selection.visualization.distribution_plotter import MarginalDistributionPlotter
+    from data_analysis_variable_selection.visualization.correlation_heatmap import CorrelationHeatmapPlotter
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Dummy container
+        x = np.random.randn(20, 3)
+        y = np.random.randn(20, 3) + 0.5
+        names = ["VarA", "VarB", "VarC"]
+        container = TwoSampleDataContainer(
+            sample_matrix_x=x,
+            sample_matrix_y=y,
+            name_features=names,
+        )
+
+        sel = VariableSelectionResult(
+            indices_selected=[0, 1],
+            names_selected=["VarA", "VarB"],
+            weights_selected=[1.0, 0.5],
+        )
+
+        # 1. Marginal Distribution Plotter
+        dist_plotter = MarginalDistributionPlotter()
+        img_paths = dist_plotter.plot_marginal_distributions(container, sel, tmp_dir)
+        assert len(img_paths) == 2
+        for p in img_paths:
+            assert os.path.exists(p)
+            assert os.path.getsize(p) > 0
+        # end for
+
+        # 2. Correlation Heatmap Plotter
+        matrix_corr = np.corrcoef(np.vstack([x, y]).T)
+        corr_res = CorrelationResult(
+            matrix_correlation=matrix_corr,
+            list_edges=[CorrelationEdge(id_variable_1=0, id_variable_2=1, correlation_score=float(matrix_corr[0, 1]))],
+            names_variables=names,
+        )
+        heatmap_plotter = CorrelationHeatmapPlotter()
+        heatmap_path = heatmap_plotter.plot_correlation_heatmap(corr_res, tmp_dir, selection_result=sel)
+        assert os.path.exists(heatmap_path)
+        assert os.path.getsize(heatmap_path) > 0
+    # end with
+# end def test_marginal_distribution_and_heatmap_plotters

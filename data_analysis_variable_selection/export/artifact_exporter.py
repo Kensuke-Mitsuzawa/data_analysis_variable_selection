@@ -2,6 +2,7 @@ import os
 import typing as ty
 from ..database.manager import DuckDBStorageManager
 from ..common.models import (
+    TwoSampleDataContainer,
     CorrelationResult,
     VariableClusteringResult,
     VariableSelectionResult,
@@ -11,6 +12,8 @@ from .tabular_exporter import TabularArtifactExporter
 from ..visualization.constellation_graph import ConstellationGraphPlotter
 from ..visualization.tornado_chart import TornadoChartPlotter
 from ..visualization.radar_chart import PersonaRadarChartPlotter
+from ..visualization.distribution_plotter import MarginalDistributionPlotter
+from ..visualization.correlation_heatmap import CorrelationHeatmapPlotter
 
 
 class ArtifactExporter:
@@ -24,6 +27,8 @@ class ArtifactExporter:
         self.constellation_plotter = ConstellationGraphPlotter()
         self.tornado_plotter = TornadoChartPlotter()
         self.radar_plotter = PersonaRadarChartPlotter()
+        self.distribution_plotter = MarginalDistributionPlotter()
+        self.heatmap_plotter = CorrelationHeatmapPlotter()
         # end def __init__
 
     def export_all_artifacts(
@@ -33,17 +38,19 @@ class ArtifactExporter:
         clustering_result: VariableClusteringResult,
         selection_result: VariableSelectionResult,
         prototype_result: PrototypeSampleResult,
-        directory_output: str
+        directory_output: str,
+        container: ty.Optional[TwoSampleDataContainer] = None,
     ) -> ty.Dict[str, ty.Any]:
         """Generates all CSV files and charts and writes them to the specified directory.
 
         Args:
             db_manager: Connected DuckDBStorageManager containing populated tables.
-            correlation_result: Correlation result for network graph.
+            correlation_result: Correlation result for network graph and heatmap.
             clustering_result: Clustering result for tornado and radar charts.
             selection_result: Variable selection result with anchor variables.
             prototype_result: Extracted prototype samples for radar charts.
             directory_output: Output folder for deliverables.
+            container: Optional TwoSampleDataContainer holding unscaled matrices for marginal distributions.
 
         Returns:
             Dictionary mapping artifact names to their file paths.
@@ -86,6 +93,25 @@ class ArtifactExporter:
             directory_output=directory_output,
         )
         dict_artifacts["persona_radar_charts"] = list_radar
+
+        # 5. Marginal Univariate Distribution Plots
+        if container is not None:
+            list_marginal = self.distribution_plotter.plot_marginal_distributions(
+                container=container,
+                selection_result=selection_result,
+                directory_output=directory_output,
+            )
+            dict_artifacts["marginal_distribution_plots"] = list_marginal
+        # end if
+
+        # 6. Correlation Matrix Heatmap
+        path_heatmap = self.heatmap_plotter.plot_correlation_heatmap(
+            correlation_result=correlation_result,
+            directory_output=directory_output,
+            clustering_result=clustering_result,
+            selection_result=selection_result,
+        )
+        dict_artifacts["correlation_heatmap"] = path_heatmap
 
         return dict_artifacts
         # end def export_all_artifacts

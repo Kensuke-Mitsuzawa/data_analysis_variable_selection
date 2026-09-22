@@ -31,5 +31,8 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["data_analysis_variable_selection*"]
 
+[tool.setuptools.package-data]
+data_analysis_variable_selection = ["export/template_report/base_report.md"]
+
 [tool.uv.sources]
 mmd-tst-variable-detector = { git = "https://github.com/Kensuke-Mitsuzawa/mmd-two-sample-test-variable-selection", rev = "1.6.2" }

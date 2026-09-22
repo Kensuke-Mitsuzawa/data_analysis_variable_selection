@@ -4,7 +4,7 @@
 
 ---
 
-## 1. Discovered Anchor Variables ($\hat{S}$)
+## Discovered Anchor Variables ($\hat{S}$)
 
 Anchor variables represent the core intrinsic dimensions exhibiting maximum discrepancy between distributions:
 
@@ -12,7 +12,19 @@ Anchor variables represent the core intrinsic dimensions exhibiting maximum disc
 
 ---
 
-## 2. Cluster Themes & Augmented Feature Sets ($S_\text{tilde}$)
+## Comparison of marginal univariate distributions
+
+{{ section_marginal_univariate_distributions }}
+
+---
+
+## Variable Correlation
+
+{{ section_variable_correlation }}
+
+---
+
+## Cluster Themes & Augmented Feature Sets ($S_\text{tilde}$)
 
 Features correlated with anchor variables are grouped into thematic clusters to provide business/domain interpretability:
 
@@ -20,7 +32,7 @@ Features correlated with anchor variables are grouped into thematic clusters to 
 
 ---
 
-## 3. Representative Prototype Exemplars
+## Representative Prototype Exemplars
 
 Prototypical samples representing the central density of each distribution in the discrepancy subspace:
 

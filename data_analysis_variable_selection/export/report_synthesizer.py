@@ -97,12 +97,16 @@ class ReportSynthesizer:
         table_anchors = self.render_table_anchor_variables(df_sel=df_sel)
         table_clust = self.render_table_cluster_themes(df_clust=df_clust)
         table_proto = self.render_table_representative_prototypes(df_proto=df_proto)
+        section_marginal = self.render_section_marginal_univariate_distributions(dict_artifacts=dict_artifacts)
+        section_corr = self.render_section_variable_correlation(dict_artifacts=dict_artifacts)
         section_vis = self.render_section_visualizations(dict_artifacts=dict_artifacts)
 
         dict_context = {
             "title_report": title_report,
             "summary_note": summary_note,
             "table_anchor_variables": table_anchors,
+            "section_marginal_univariate_distributions": section_marginal,
+            "section_variable_correlation": section_corr,
             "table_cluster_themes": table_clust,
             "table_representative_prototypes": table_proto,
             "section_visualizations": section_vis,
@@ -182,13 +186,15 @@ class ReportSynthesizer:
     def render_table_cluster_themes(
         self,
         df_clust: pd.DataFrame,
-        max_rows: int = 25
+        top_k_per_cluster: int = 5
     ) -> str:
-        """Formats clustered features into a Markdown table.
+        """Formats clustered features into a Markdown table grouped by cluster-id, top-5 per cluster.
+
+        Filters out records where the Relatedness Score is NA / None.
 
         Args:
             df_clust: DataFrame containing clustering records.
-            max_rows: Maximum records to show inline before truncation note.
+            top_k_per_cluster: Maximum top records shown per cluster.
 
         Returns:
             Markdown table string.
@@ -197,22 +203,95 @@ class ReportSynthesizer:
             return "*No cluster records available.*"
         # end if
 
+        # Filter out rows where Relatedness Score is NA
+        df_valid = df_clust[df_clust["score_related"].notna()].copy()
+        if df_valid.empty:
+            return "*No augmented features with valid relatedness scores available.*"
+        # end if
+
         lines = [
             "| Cluster ID | Feature Name | Relatedness Score |",
             "| :--- | :--- | :--- |",
         ]
-        for _, row in df_clust.head(max_rows).iterrows():
-            score_str = f"{float(row['score_related']):.4f}" if pd.notna(row['score_related']) else "N/A"
-            lines.append(
-                f"| Cluster {int(row['id_cluster'])} | **{row['name_variable']}** | {score_str} |"
-            )
-        # end for
 
-        if len(df_clust) > max_rows:
-            lines.append(f"| ... | *({len(df_clust) - max_rows} more records in Excel report)* | ... |")
-        # end if
+        # Group by cluster ID and sort by score_related descending
+        clusters = sorted(df_valid["id_cluster"].unique())
+        for cid in clusters:
+            df_c = df_valid[df_valid["id_cluster"] == cid].sort_values("score_related", ascending=False)
+            df_top = df_c.head(top_k_per_cluster)
+            for _, row in df_top.iterrows():
+                lines.append(
+                    f"| Cluster {int(row['id_cluster'])} | **{row['name_variable']}** | {float(row['score_related']):.4f} |"
+                )
+            # end for
+        # end for cid
+
         return "\n".join(lines)
         # end def render_table_cluster_themes
+
+    def render_section_marginal_univariate_distributions(
+        self,
+        dict_artifacts: ty.Optional[ty.Dict[str, ty.Any]] = None
+    ) -> str:
+        """Formats the marginal univariate distributions section for detected anchor variables.
+
+        Args:
+            dict_artifacts: Mapping of artifact paths.
+
+        Returns:
+            Markdown snippet string with embedded univariate distribution plots.
+        """
+        if not dict_artifacts or "marginal_distribution_plots" not in dict_artifacts:
+            return "*Marginal univariate distribution plots not available.*"
+        # end if
+
+        list_plots = dict_artifacts["marginal_distribution_plots"]
+        if not list_plots:
+            return "*No marginal distribution plots generated.*"
+        # end if
+
+        lines = [
+            "Comparative univariate distributions of unscaled feature values between Distribution $X$ and Distribution $Y$ for all detected anchor variables ($\\hat{S}$):",
+            "",
+        ]
+
+        for path_img in list_plots:
+            rel_path = os.path.basename(path_img)
+            name_part = os.path.splitext(rel_path)[0].replace("univariate_distribution_", "")
+            lines.append(f"### Marginal Distribution: `{name_part}`")
+            lines.append(f"![Marginal Distribution - {name_part}]({rel_path})")
+            lines.append("")
+        # end for
+
+        return "\n".join(lines).strip()
+        # end def render_section_marginal_univariate_distributions
+
+    def render_section_variable_correlation(
+        self,
+        dict_artifacts: ty.Optional[ty.Dict[str, ty.Any]] = None
+    ) -> str:
+        """Formats the variable correlation section with embedded heatmap.
+
+        Args:
+            dict_artifacts: Mapping of artifact paths.
+
+        Returns:
+            Markdown snippet string with embedded heatmap.
+        """
+        if not dict_artifacts or "correlation_heatmap" not in dict_artifacts:
+            return "*Variable correlation heatmap not available.*"
+        # end if
+
+        path_heatmap = dict_artifacts["correlation_heatmap"]
+        rel_path = os.path.basename(path_heatmap)
+
+        lines = [
+            "Pairwise relationship matrix derived from Graphical Lasso precision analysis across key anchor variables and their augmented thematic clusters ($S_\\text{tilde}$). Red indicates positive correlation / strong connection, while Blue indicates negative or lower association:",
+            "",
+            f"![Variable Correlation Matrix Heatmap]({rel_path})",
+        ]
+        return "\n".join(lines)
+        # end def render_section_variable_correlation
 
     def render_table_representative_prototypes(
         self,

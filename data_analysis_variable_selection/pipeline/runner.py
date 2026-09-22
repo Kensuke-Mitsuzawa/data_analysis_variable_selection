@@ -184,6 +184,7 @@ class PipelineOrchestrator:
             selection_result=selection_result,
             prototype_result=combined_prototypes,
             directory_output=path_output_directory,
+            container=data_container,
         )
         db_manager.close_connection_database()
 

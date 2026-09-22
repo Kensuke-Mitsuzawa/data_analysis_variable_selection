@@ -395,6 +395,7 @@ def cmd_generate_report(
             selection_result=sel_result,
             prototype_result=combined_prototypes,
             directory_output=output_dir,
+            container=container,
         )
         typer.echo(f"✓ Generated visual network, tornado, and radar charts in: {output_dir}")
     # end if
