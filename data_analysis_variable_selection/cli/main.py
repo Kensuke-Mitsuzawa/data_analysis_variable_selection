@@ -11,6 +11,8 @@ from ..datasets.base_report_generator import BaseDatasetReportGenerator
 from ..datasets.ames_housing.config import AmesPreprocessingConfig
 from ..datasets.ames_housing.preprocessor import AmesHousingPreprocessor
 from ..datasets.ames_housing.report_generator import AmesHousingReportGenerator
+from ..datasets.speed_dating.config import SpeedDatingPreprocessingConfig
+from ..datasets.speed_dating.report_generator import SpeedDatingReportGenerator
 from ..common.models import TwoSampleDataContainer, VariableSelectionResult, CorrelationResult, VariableClusteringResult, PrototypeSampleResult
 from ..common.scaler import ZScoreFeatureScaler
 from ..variable_selection.mmd.config import MMDSelectionConfig
@@ -375,6 +377,13 @@ def _get_dataset_report_generator(cfg: PipelineCliConfig) -> BaseDatasetReportGe
             random_seed_sampling=cfg.dataset.ames_housing.random_seed_sampling,
         )
         return AmesHousingReportGenerator(config=ames_cfg)
+    elif dataset_name == "speed_dating":
+        sd_cfg = SpeedDatingPreprocessingConfig(
+            path_data_file=cfg.dataset.speed_dating.raw_data_path,
+            max_records_per_distribution=cfg.dataset.speed_dating.max_records_per_distribution,
+            random_seed_sampling=cfg.dataset.speed_dating.random_seed_sampling,
+        )
+        return SpeedDatingReportGenerator(config=sd_cfg)
     else:
         raise ValueError(f"Dataset '{dataset_name}' does not have a dataset report generator implemented.")
     # end if
@@ -523,7 +532,13 @@ def cmd_generate_report(
         try:
             generator = _get_dataset_report_generator(cfg)
             dataset_title = cfg.report.dataset_report_title or f"{cfg.project.dataset_name.replace('_', ' ').title()} Dataset Exploratory Report"
-            raw_path = cfg.dataset.ames_housing.raw_data_path if cfg.project.dataset_name == "ames_housing" else None
+            if cfg.project.dataset_name == "ames_housing":
+                raw_path = cfg.dataset.ames_housing.raw_data_path
+            elif cfg.project.dataset_name == "speed_dating":
+                raw_path = cfg.dataset.speed_dating.raw_data_path
+            else:
+                raw_path = None
+            # end if
             artifacts_dataset = generator.generate_dataset_report(
                 directory_output=output_dir,
                 path_raw_data=raw_path,
@@ -578,7 +593,13 @@ def cmd_generate_dataset_report(
 
     generator = _get_dataset_report_generator(cfg)
     dataset_title = cfg.report.dataset_report_title or f"{cfg.project.dataset_name.replace('_', ' ').title()} Dataset Exploratory Report"
-    raw_path = cfg.dataset.ames_housing.raw_data_path if cfg.project.dataset_name == "ames_housing" else None
+    if cfg.project.dataset_name == "ames_housing":
+        raw_path = cfg.dataset.ames_housing.raw_data_path
+    elif cfg.project.dataset_name == "speed_dating":
+        raw_path = cfg.dataset.speed_dating.raw_data_path
+    else:
+        raw_path = None
+    # end if
     artifacts_dataset = generator.generate_dataset_report(
         directory_output=output_dir,
         path_raw_data=raw_path,

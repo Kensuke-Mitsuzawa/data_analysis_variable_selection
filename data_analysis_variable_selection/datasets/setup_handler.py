@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ..cli.cli_config import PipelineCliConfig
 from .ames_housing.loader import AmesHousingDataLoader
+from .speed_dating.loader import SpeedDatingDataLoader
 
 logger = logging.getLogger(__name__)
 
@@ -119,14 +120,15 @@ class DatasetSetupHandler:
             return str(target_csv.resolve())
         # end if
 
-        if sd_cfg.url_download:
-            logger.info(f"Downloading Speed Dating dataset from: {sd_cfg.url_download}")
+        if not target_csv.exists():
+            logger.info("Using SpeedDatingDataLoader to fetch and cache raw data...")
+            loader = SpeedDatingDataLoader()
+            df = loader.load_data_raw(path_source=sd_cfg.url_download or raw_path)
             target_csv.parent.mkdir(parents=True, exist_ok=True)
-            urllib.request.urlretrieve(sd_cfg.url_download, str(target_csv))
-        else:
-            logger.info(f"Raw speed dating file not found at {target_csv}. Please provide dataset path in TOML.")
+            df.to_csv(target_csv, index=False)
         # end if
 
+        logger.info(f"Dataset successfully setup at: {target_csv}")
         return str(target_csv.resolve())
         # end def _setup_speed_dating
 # end class DatasetSetupHandler

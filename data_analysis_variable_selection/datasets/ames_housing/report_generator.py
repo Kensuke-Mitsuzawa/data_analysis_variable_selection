@@ -113,10 +113,20 @@ class AmesHousingReportGenerator(BaseDatasetReportGenerator):
         domain_na_summaries = [s for s in missingness_summaries if s.name_column in domain_na_cols]
 
         # 2. Build Markdown content
+        git_commit_id = self.get_git_commit_id()
+        report_timestamp = self.get_generation_timestamp()
+        source_url = getattr(self.config, "url_download", None) or "https://www.openml.org/data/get_csv/21785545/ames_housing.csv"
+
         lines: ty.List[str] = [
             f"# {report_title}",
             "",
             "> **Dataset Overview**: The Ames Housing dataset describes property sales in Ames, Iowa across 80+ nominal, ordinal, and continuous features. This report provides baseline domain exploratory data analysis, shallow statistical distributions, and empirical shifts between the **Pre-Crash market ($X$: 2006–2007)** and the **Post-Crash market ($Y$: 2009–2010)**.",
+            "",
+            "| Report Metadata | Description |",
+            "| :--- | :--- |",
+            f"| **Generated At** | {report_timestamp} |",
+            f"| **Git Commit** | `{git_commit_id}` |",
+            f"| **Dataset Source URL** | [{source_url}]({source_url}) |",
             "",
             "---",
             "",

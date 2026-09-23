@@ -84,8 +84,8 @@ class SpeedDatingDatasetConfig(BaseModel):
         description="Path to local raw CSV file."
     )
     url_download: ty.Optional[str] = Field(
-        default=None,
-        description="URL to download raw Speed Dating dataset."
+        default="https://www.kaggle.com/datasets/annavictoria/speed-dating-experiment",
+        description="Source URL for the dataset on Kaggle: 'https://www.kaggle.com/datasets/annavictoria/speed-dating-experiment'."
     )
     max_records_per_distribution: ty.Optional[int] = Field(
         default=500,

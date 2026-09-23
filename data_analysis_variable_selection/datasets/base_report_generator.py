@@ -81,7 +81,33 @@ class BaseDatasetReportGenerator(abc.ABC):
             name_dataset: Descriptive human-readable dataset name.
         """
         self.name_dataset = name_dataset
-        # end def __init__
+    def get_git_commit_id(self) -> str:
+        """Fetches the current Git commit hash if in a git repository.
+
+        Returns:
+            Git commit hash string or 'Unknown'.
+        """
+        import subprocess
+        try:
+            commit_id = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                stderr=subprocess.DEVNULL
+            ).decode("utf-8").strip()
+            return commit_id
+        except Exception:
+            return "Unknown"
+        # end try
+        # end def get_git_commit_id
+
+    def get_generation_timestamp(self) -> str:
+        """Returns formatted UTC timestamp of report generation.
+
+        Returns:
+            Timestamp string in format YYYY-MM-DD HH:MM:SS UTC.
+        """
+        from datetime import datetime, timezone
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        # end def get_generation_timestamp
 
     @abc.abstractmethod
     def generate_markdown_report(
