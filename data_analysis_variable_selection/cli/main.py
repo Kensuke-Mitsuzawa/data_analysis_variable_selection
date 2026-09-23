@@ -85,7 +85,7 @@ def copy_config_file(path_toml_config: Path, cfg: PipelineCliConfig) -> None:
 
 @app.command("setup")
 def cmd_setup(
-    config: str = typer.Option("config.toml", "--config", "-c", help="Path to TOML configuration file.")
+    config: str = typer.Argument(help="Path to TOML configuration file.")
 ) -> None:
     """Setup datasets: download and uncompress raw files as specified in TOML config."""
     cfg = load_toml_config(config)
@@ -100,7 +100,7 @@ def cmd_setup(
 
 @app.command("preprocess")
 def cmd_preprocess(
-    config: str = typer.Option("config.toml", "--config", "-c", help="Path to TOML configuration file.")
+    config: str = typer.Argument(help="Path to TOML configuration file.")
 ) -> None:
     """Preprocess data: transform features, save human-readable table in DuckDB, and cache array container."""
     cfg = load_toml_config(config)
@@ -165,7 +165,7 @@ def cmd_preprocess(
 
 @app.command("variable-detection")
 def cmd_variable_detection(
-    config: str = typer.Option("config.toml", "--config", "-c", help="Path to TOML configuration file.")
+    config: str = typer.Argument(help="Path to TOML configuration file.")
 ) -> None:
     """Execute variable selection (MMD or 1D-Wasserstein) and persist anchor variables."""
     cfg = load_toml_config(config)
@@ -292,7 +292,7 @@ def cmd_variable_detection(
 
 @app.command("variable-analysis")
 def cmd_variable_analysis(
-    config: str = typer.Option("config.toml", "--config", "-c", help="Path to TOML configuration file.")
+    config: str = typer.Argument(help="Path to TOML configuration file.")
 ) -> None:
     """Analyze relationships: calculate correlation/precision matrix and cluster variables."""
     cfg = load_toml_config(config)
@@ -442,7 +442,7 @@ def _get_dataset_report_generator(cfg: PipelineCliConfig) -> BaseDatasetReportGe
 
 @app.command("generate-report")
 def cmd_generate_report(
-    config: str = typer.Option("config.toml", "--config", "-c", help="Path to TOML configuration file.")
+    config: str = typer.Argument(help="Path to TOML configuration file.")
 ) -> None:
     """Generate visual plots, multi-sheet Excel workbooks, and executive reports (dataset-specific and analysis pipeline)."""
     cfg = load_toml_config(config)
@@ -638,7 +638,7 @@ def cmd_generate_report(
 
 @app.command("generate-dataset-report")
 def cmd_generate_dataset_report(
-    config: str = typer.Option("config.toml", "--config", "-c", help="Path to TOML configuration file.")
+    config: str = typer.Argument(help="Path to TOML configuration file.")
 ) -> None:
     """Generate dataset-specific exploratory report with shallow-level statistics."""
     cfg = load_toml_config(config)
@@ -672,7 +672,7 @@ def cmd_generate_dataset_report(
 
 @app.command("run-all")
 def cmd_run_all(
-    config: str = typer.Option("config.toml", "--config", "-c", help="Path to TOML configuration file.")
+    config: str = typer.Argument(help="Path to TOML configuration file.")
 ) -> None:
     """Execute all pipeline stages sequentially: setup, preprocess, variable-detection, variable-analysis, generate-report."""
     typer.echo("=== [Step 1/5] Setup ===")

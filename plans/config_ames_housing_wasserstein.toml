@@ -40,7 +40,7 @@ dask_threads_per_worker = 2       # Threads per Dask worker (configurable)
 random_seed = 42
 
 [variable_detection.wasserstein]
-distributed_backend = "dask"          # "single", "joblib", or "dask"
+distributed_backend = "single"          # "single", "joblib", or "dask"
 variable_detection_approach = "hist_based"
 threshold_weights = 0.1
 top_k_fallback = 5
