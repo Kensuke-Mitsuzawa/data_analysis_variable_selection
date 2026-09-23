@@ -63,7 +63,7 @@ class SpeedDatingDataCleaner:
             config.columns_interests
             + config.columns_self_ratings
             + config.columns_stated_preferences
-            + ["age", "imprace", "imprelig", "date", "go_out"]
+            + ["age", "imprace", "imprelig", "date", "go_out", "exphappy", "expnum"]
         )
         df_clean = self.impute_missing_ratings_median(df_clean, impute_median_cols)
 

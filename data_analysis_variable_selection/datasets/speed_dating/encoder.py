@@ -33,24 +33,98 @@ class SpeedDatingFeatureEncoder:
         # Retain match target
         dict_features["match"] = df_pairs["match"].values
 
-        # 1. Direct Concatenation of Participant Features
-        core_columns = (
-            config.columns_demographics
-            + config.columns_interests
-            + config.columns_self_ratings
-            + config.columns_stated_preferences
-        )
-
-        int_demographics = {"age", "imprace", "imprelig", "date", "go_out"}
-        for col in core_columns:
-            if col in config.columns_interests or col in config.columns_self_ratings or col in int_demographics:
-                type_feat = "int"
-            elif col in {"goal", "field_cd"}:
-                type_feat = "category"
-            else:
-                type_feat = "float"
+        # 1. Age Difference
+        if "age_male" in df_pairs.columns and "age_female" in df_pairs.columns:
+            dict_features["Diff_age"] = np.abs(
+                df_pairs["age_male"].astype(float).values - df_pairs["age_female"].astype(float).values
+            )
+            if recorder is not None:
+                recorder.record_feature(
+                    name_processed="Diff_age",
+                    source_original="age",
+                    type_feature="float"
+                )
             # end if
+        # end if
 
+        # 2. Leisure & Activity Differences (17 domains)
+        interest_names = config.columns_interests
+        m_interests_matrix: ty.List[np.ndarray] = []
+        f_interests_matrix: ty.List[np.ndarray] = []
+
+        for inter in interest_names:
+            col_m = f"{inter}_male"
+            col_f = f"{inter}_female"
+            if col_m in df_pairs.columns and col_f in df_pairs.columns:
+                vals_m = df_pairs[col_m].astype(float).values
+                vals_f = df_pairs[col_f].astype(float).values
+                dict_features[f"Diff_{inter}"] = np.abs(vals_m - vals_f)
+                m_interests_matrix.append(vals_m)
+                f_interests_matrix.append(vals_f)
+                if recorder is not None:
+                    recorder.record_feature(
+                        name_processed=f"Diff_{inter}",
+                        source_original=inter,
+                        type_feature="float"
+                    )
+                # end if
+            # end if
+        # end for inter
+
+        # 3. Cosine Similarity Across Holistic Interest Vectors
+        if m_interests_matrix and f_interests_matrix:
+            mat_m = np.column_stack(m_interests_matrix)
+            mat_f = np.column_stack(f_interests_matrix)
+            dict_features["Interest_Cosine_Sim"] = self.compute_similarity_interest_cosine(mat_m, mat_f)
+            if recorder is not None:
+                recorder.record_feature(
+                    name_processed="Interest_Cosine_Sim",
+                    source_original=sorted(interest_names),
+                    type_feature="float"
+                )
+            # end if
+        # end if
+
+        # 4. Trait Differences (attr*_1, sinc*_1, intel*_1, fun*_1, amb*_1, shar*_1)
+        trait_columns = config.columns_stated_preferences + config.columns_self_ratings
+        for trait in trait_columns:
+            col_m = f"{trait}_male"
+            col_f = f"{trait}_female"
+            if col_m in df_pairs.columns and col_f in df_pairs.columns:
+                vals_m = df_pairs[col_m].astype(float).values
+                vals_f = df_pairs[col_f].astype(float).values
+                dict_features[f"Diff_{trait}"] = np.abs(vals_m - vals_f)
+                if recorder is not None:
+                    recorder.record_feature(
+                        name_processed=f"Diff_{trait}",
+                        source_original=trait,
+                        type_feature="float"
+                    )
+                # end if
+            # end if
+        # end for trait
+
+        # 5. Survey Field Differences (goal, date, go_out, exphappy, expnum)
+        survey_diff_columns = ["goal", "date", "go_out", "exphappy", "expnum"]
+        for s_col in survey_diff_columns:
+            col_m = f"{s_col}_male"
+            col_f = f"{s_col}_female"
+            if col_m in df_pairs.columns and col_f in df_pairs.columns:
+                vals_m = df_pairs[col_m].astype(float).values
+                vals_f = df_pairs[col_f].astype(float).values
+                dict_features[f"Diff_{s_col}"] = np.abs(vals_m - vals_f)
+                if recorder is not None:
+                    recorder.record_feature(
+                        name_processed=f"Diff_{s_col}",
+                        source_original=s_col,
+                        type_feature="float"
+                    )
+                # end if
+            # end if
+        # end for s_col
+
+        # 6. Demographics Pass-Through (imprace, imprelig)
+        for col in ["imprace", "imprelig"]:
             col_m = f"{col}_male"
             col_f = f"{col}_female"
             if col_m in df_pairs.columns:
@@ -59,7 +133,7 @@ class SpeedDatingFeatureEncoder:
                     recorder.record_feature(
                         name_processed=f"Male_{col}",
                         source_original=col,
-                        type_feature=type_feat
+                        type_feature="int"
                     )
                 # end if
             # end if
@@ -69,26 +143,13 @@ class SpeedDatingFeatureEncoder:
                     recorder.record_feature(
                         name_processed=f"Female_{col}",
                         source_original=col,
-                        type_feature=type_feat
+                        type_feature="int"
                     )
                 # end if
             # end if
         # end for col
 
-        # 2. Homophily & Demographic Differences
-        if "age_male" in df_pairs.columns and "age_female" in df_pairs.columns:
-            dict_features["Age_Gap"] = np.abs(
-                df_pairs["age_male"].astype(float).values - df_pairs["age_female"].astype(float).values
-            )
-            if recorder is not None:
-                recorder.record_feature(
-                    name_processed="Age_Gap",
-                    source_original="age",
-                    type_feature="float"
-                )
-            # end if
-        # end if
-
+        # 7. Homophily & Agreement Indicators
         if "race_male" in df_pairs.columns and "race_female" in df_pairs.columns:
             same_race = (df_pairs["race_male"] == df_pairs["race_female"]).astype(float).values
             dict_features["Same_Race"] = same_race
@@ -141,45 +202,7 @@ class SpeedDatingFeatureEncoder:
             # end if
         # end if
 
-        # 3. Leisure & Activity Differences (17 domains)
-        interest_names = config.columns_interests
-        m_interests_matrix: ty.List[np.ndarray] = []
-        f_interests_matrix: ty.List[np.ndarray] = []
-
-        for inter in interest_names:
-            col_m = f"{inter}_male"
-            col_f = f"{inter}_female"
-            if col_m in df_pairs.columns and col_f in df_pairs.columns:
-                vals_m = df_pairs[col_m].astype(float).values
-                vals_f = df_pairs[col_f].astype(float).values
-                dict_features[f"Diff_{inter}"] = np.abs(vals_m - vals_f)
-                m_interests_matrix.append(vals_m)
-                f_interests_matrix.append(vals_f)
-                if recorder is not None:
-                    recorder.record_feature(
-                        name_processed=f"Diff_{inter}",
-                        source_original=inter,
-                        type_feature="float"
-                    )
-                # end if
-            # end if
-        # end for inter
-
-        # 4. Cosine Similarity Across Holistic Interest Vectors
-        if m_interests_matrix and f_interests_matrix:
-            mat_m = np.column_stack(m_interests_matrix)
-            mat_f = np.column_stack(f_interests_matrix)
-            dict_features["Interest_Cosine_Sim"] = self.compute_similarity_interest_cosine(mat_m, mat_f)
-            if recorder is not None:
-                recorder.record_feature(
-                    name_processed="Interest_Cosine_Sim",
-                    source_original=sorted(interest_names),
-                    type_feature="float"
-                )
-            # end if
-        # end if
-
-        # 5. Preference-Trait Alignment Deltas
+        # 8. Preference-Trait Alignment Deltas
         # Normalize stated preference weights (summing to ~100) to 1-10 scale
         if "attr3_1_male" in df_pairs.columns and "attr1_1_female" in df_pairs.columns:
             pref_attr_f = df_pairs["attr1_1_female"].astype(float).values / 10.0

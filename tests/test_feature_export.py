@@ -13,14 +13,14 @@ from data_analysis_variable_selection.datasets.ames_housing.preprocessor import 
 
 
 def test_speed_dating_feature_list_extraction():
-    """Verify speed dating feature list contains all 95 active features, removed features, and valid 3-column attributes."""
+    """Verify speed dating feature list contains all 47 active features, removed features, and valid 3-column attributes."""
     cfg = load_toml_config("plans/config_speed_dating_mmd_cv.toml")
     preprocessor = SpeedDatingPreprocessor()
     tracker = FeatureOperationTracker()
 
     # 1. Verify active features only
     active_features = tracker.track_features_dataset(preprocessor=preprocessor, config=cfg, include_removed=False)
-    assert len(active_features) == 95
+    assert len(active_features) == 47
     feature_dict = {f.feature_processed: f for f in active_features}
 
     # Verify combined features are formatted as list expressions
@@ -41,18 +41,52 @@ def test_speed_dating_feature_list_extraction():
     assert feature_dict["Interest_Cosine_Sim"].feature_original.endswith("']")
     assert feature_dict["Interest_Cosine_Sim"].type_feature == "float"
 
-    # Verify single features
-    assert "Age_Gap" in feature_dict
-    assert feature_dict["Age_Gap"].feature_original == "age"
-    assert feature_dict["Age_Gap"].type_feature == "float"
+    # Verify diff features for age, interests, traits, and survey expectations
+    assert "Diff_age" in feature_dict
+    assert feature_dict["Diff_age"].feature_original == "age"
+    assert feature_dict["Diff_age"].type_feature == "float"
 
-    assert "Same_Race" in feature_dict
-    assert feature_dict["Same_Race"].feature_original == "race"
-    assert feature_dict["Same_Race"].type_feature == "category"
+    assert "Diff_art" in feature_dict
+    assert feature_dict["Diff_art"].feature_original == "art"
+    assert feature_dict["Diff_art"].type_feature == "float"
 
-    assert "Male_age" in feature_dict
-    assert feature_dict["Male_age"].feature_original == "age"
-    assert feature_dict["Male_age"].type_feature == "int"
+    assert "Diff_attr1_1" in feature_dict
+    assert feature_dict["Diff_attr1_1"].feature_original == "attr1_1"
+    assert feature_dict["Diff_attr1_1"].type_feature == "float"
+
+    assert "Diff_attr3_1" in feature_dict
+    assert feature_dict["Diff_attr3_1"].feature_original == "attr3_1"
+    assert feature_dict["Diff_attr3_1"].type_feature == "float"
+
+    assert "Diff_goal" in feature_dict
+    assert feature_dict["Diff_goal"].feature_original == "goal"
+    assert feature_dict["Diff_goal"].type_feature == "float"
+
+    assert "Diff_date" in feature_dict
+    assert feature_dict["Diff_date"].feature_original == "date"
+    assert feature_dict["Diff_date"].type_feature == "float"
+
+    assert "Diff_go_out" in feature_dict
+    assert feature_dict["Diff_go_out"].feature_original == "go_out"
+    assert feature_dict["Diff_go_out"].type_feature == "float"
+
+    assert "Diff_exphappy" in feature_dict
+    assert feature_dict["Diff_exphappy"].feature_original == "exphappy"
+    assert feature_dict["Diff_exphappy"].type_feature == "float"
+
+    assert "Diff_expnum" in feature_dict
+    assert feature_dict["Diff_expnum"].feature_original == "expnum"
+    assert feature_dict["Diff_expnum"].type_feature == "float"
+
+    # Verify individual gender features were removed
+    assert "Male_age" not in feature_dict
+    assert "Female_age" not in feature_dict
+    assert "Male_art" not in feature_dict
+    assert "Female_art" not in feature_dict
+    assert "Male_attr1_1" not in feature_dict
+    assert "Female_attr1_1" not in feature_dict
+    assert "Male_goal" not in feature_dict
+    assert "Female_goal" not in feature_dict
 
     # Check valid types across all active features
     valid_active_types = {"int", "float", "category", "str"}
@@ -62,7 +96,7 @@ def test_speed_dating_feature_list_extraction():
 
     # 2. Verify all features with include_removed=True (default)
     all_features = tracker.track_features_dataset(preprocessor=preprocessor, config=cfg, include_removed=True)
-    assert len(all_features) > 95
+    assert len(all_features) > 47
     removed_features = [f for f in all_features if f.feature_processed == "removed"]
     assert len(removed_features) > 150
     for rem in removed_features:
@@ -151,8 +185,12 @@ def test_export_feature_list_markdown_speed_dating():
         assert "| processed feature | original feature | type of the processed feature |" in content
         assert "| :--- | :--- | :--- |" in content
 
-        # Verify sample active rows
-        assert "| Age_Gap | age | float |" in content
+        # Verify sample active diff rows
+        assert "| Diff_age | age | float |" in content
+        assert "| Diff_goal | goal | float |" in content
+        assert "| Diff_date | date | float |" in content
+        assert "| Diff_exphappy | exphappy | float |" in content
+        assert "| Diff_expnum | expnum | float |" in content
         assert "| Delta_Female_Attr_Align | ['attr3_1', 'attr1_1'] | float |" in content
         assert "| Race_Preference_Conflict | ['race', 'imprace'] | float |" in content
         assert "| Same_Race | race | category |" in content
