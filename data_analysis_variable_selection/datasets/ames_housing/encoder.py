@@ -34,16 +34,18 @@ class AmesHousingFeatureEncoder:
     def encode_features_nominal_onehot(
         self,
         df_data: pd.DataFrame,
-        columns_nominal: ty.Optional[ty.List[str]] = None
-    ) -> pd.DataFrame:
+        columns_nominal: ty.Optional[ty.List[str]] = None,
+        return_lineage: bool = False
+    ) -> ty.Union[pd.DataFrame, ty.Tuple[pd.DataFrame, ty.Dict[str, ty.List[str]]]]:
         """One-hot encodes nominal categorical columns into binary indicators.
 
         Args:
             df_data: Input DataFrame with numerical and categorical features.
             columns_nominal: Explicit list of nominal columns to encode, or None to auto-detect object/category columns.
+            return_lineage: If True, also returns dictionary mapping original column to dummy columns.
 
         Returns:
-            High-dimensional DataFrame with one-hot encoded dummy indicators.
+            High-dimensional DataFrame with one-hot encoded dummy indicators (and lineage dict if requested).
         """
         if columns_nominal is None:
             # Auto-detect all string/object/category columns
@@ -53,8 +55,16 @@ class AmesHousingFeatureEncoder:
         # end if
 
         if not cols_to_encode:
-            return df_data.copy()
+            return (df_data.copy(), {}) if return_lineage else df_data.copy()
         # end if
+
+        dict_lineage: ty.Dict[str, ty.List[str]] = {}
+        for col in cols_to_encode:
+            categories = df_data[col].dropna().unique()
+            # Sort categories for consistent column order
+            categories_sorted = sorted([str(c) for c in categories])
+            dict_lineage[col] = [f"{col}_{cat}" for cat in categories_sorted]
+        # end for col
 
         df_encoded = pd.get_dummies(
             df_data,
@@ -62,6 +72,15 @@ class AmesHousingFeatureEncoder:
             drop_first=False,
             dtype=float
         )
+
+        if return_lineage:
+            # Reconcile exact columns present in df_encoded
+            for col in cols_to_encode:
+                dict_lineage[col] = [c for c in df_encoded.columns if c.startswith(f"{col}_")]
+            # end for col
+            return df_encoded, dict_lineage
+        # end if
+
         return df_encoded
         # end def encode_features_nominal_onehot
 # end class AmesHousingFeatureEncoder

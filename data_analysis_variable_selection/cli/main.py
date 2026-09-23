@@ -9,6 +9,7 @@ import shutil
 
 from .cli_config import PipelineCliConfig, load_toml_config
 from ..datasets.setup_handler import DatasetSetupHandler
+from ..datasets.feature_tracker import FeatureOperationTracker
 from ..datasets.base_report_generator import BaseDatasetReportGenerator
 from ..datasets.ames_housing.config import AmesPreprocessingConfig
 from ..datasets.ames_housing.preprocessor import AmesHousingPreprocessor
@@ -128,13 +129,25 @@ def cmd_preprocess(
 
     container = preprocessor.prepare_two_sample_data(apply_subsampling=False)
 
-    # 1. Save human-readable table into DuckDB
+    # 1. Automatically track feature operations and export feature list markdown document
+    tracker = FeatureOperationTracker()
+    list_features = tracker.track_features_dataset(
+        preprocessor=preprocessor,
+        config=cfg,
+        container=container,
+    )
+    path_features_md = tracker.export_feature_list_markdown(
+        list_features=list_features,
+        config=cfg,
+    )
+
+    # 2. Save human-readable table into DuckDB
     db = DuckDBStorageManager(path_database=cfg.get_database_path())
     db.initialize_database_schema()
     db.insert_preprocessed_features(container)
     db.close_connection_database()
 
-    # 2. Save array container to working directory
+    # 3. Save array container to working directory
     npz_path = cfg.get_features_container_path()
     container.save_to_npz(npz_path)
 
@@ -142,6 +155,7 @@ def cmd_preprocess(
         f"✓ Preprocessing complete. X shape: {container.sample_matrix_x.shape}, "
         f"Y shape: {container.sample_matrix_y.shape}, Features: {len(container.name_features)}"
     )
+    typer.echo(f"✓ Tracked {len(list_features)} feature operations and exported to: {path_features_md}")
     typer.echo(f"✓ Saved preprocessed human-readable table to DuckDB: {cfg.get_database_path()}")
     typer.echo(f"✓ Cached preprocessed arrays to: {npz_path}")
 

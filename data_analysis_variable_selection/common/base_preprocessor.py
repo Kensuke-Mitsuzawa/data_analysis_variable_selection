@@ -24,4 +24,22 @@ class BaseDatasetPreprocessor(abc.ABC):
         """
         raise NotImplementedError()
         # end def prepare_two_sample_data
+
+    def track_feature_operations(
+        self,
+        container: ty.Optional[TwoSampleDataContainer] = None,
+        include_removed: bool = True
+    ) -> ty.List[ty.Any]:
+        """Tracks and returns the lineage, source columns, and data types of all processed features.
+
+        Args:
+            container: Optional pre-computed TwoSampleDataContainer.
+            include_removed: Whether to include raw features removed during preprocessing.
+
+        Returns:
+            List of FeatureItemData entries.
+        """
+        raise NotImplementedError()
+        # end def track_feature_operations
 # end class BaseDatasetPreprocessor
+

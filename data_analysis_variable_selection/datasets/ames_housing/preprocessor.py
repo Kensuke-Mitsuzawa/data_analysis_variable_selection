@@ -39,6 +39,7 @@ class AmesHousingPreprocessor(BaseDatasetPreprocessor):
         self.cleaner = AmesHousingDataCleaner()
         self.encoder = AmesHousingFeatureEncoder()
         self.splitter = AmesHousingTemporalSplitter()
+        self._feature_operations: ty.Optional[ty.List[ty.Any]] = None
         # end def __init__
 
     def prepare_two_sample_data(
@@ -62,6 +63,10 @@ class AmesHousingPreprocessor(BaseDatasetPreprocessor):
         path_to_load = path_data or self.config.path_data_file
         df_raw = self.loader.load_data_raw(path_source=path_to_load)
 
+        from ..feature_tracker import FeatureOperationRecorder, FeatureItemData
+
+        recorder = FeatureOperationRecorder()
+
         # 1. Clean Domain NAs
         df_clean = self.cleaner.clean_dataset_domain_nas(df_raw, self.config)
 
@@ -69,11 +74,36 @@ class AmesHousingPreprocessor(BaseDatasetPreprocessor):
         df_imputed = self.cleaner.impute_missing_values_neighborhood(df_clean)
         df_imputed = self.cleaner.impute_remaining_features_generic(df_imputed)
 
+        # Record LotFrontage imputation operation
+        recorder.record_feature(
+            name_processed="LotFrontage",
+            source_original=["LotFrontage", "Neighborhood"],
+            type_feature="float"
+        )
+
         # 3. Ordinal mapping
         df_ordinal = self.encoder.encode_features_ordinal(df_imputed, self.config.ordinal_mapping_dicts)
+        for col_ord in self.config.ordinal_mapping_dicts.keys():
+            if col_ord in df_ordinal.columns:
+                recorder.record_feature(
+                    name_processed=col_ord,
+                    source_original=col_ord,
+                    type_feature="int"
+                )
+            # end if
+        # end for col_ord
 
         # 4. One-Hot Encoding for nominal features
-        df_encoded = self.encoder.encode_features_nominal_onehot(df_ordinal)
+        df_encoded, dict_onehot_lineage = self.encoder.encode_features_nominal_onehot(
+            df_ordinal,
+            return_lineage=True
+        )
+        for src_col, dummy_cols in dict_onehot_lineage.items():
+            recorder.record_onehot_expansion(
+                source_column=src_col,
+                generated_columns=dummy_cols
+            )
+        # end for src_col
 
         # 5. Temporal Two-Sample Split
         df_x, df_y = self.splitter.split_samples_temporal(df_encoded, self.config)
@@ -90,6 +120,44 @@ class AmesHousingPreprocessor(BaseDatasetPreprocessor):
         matrix_x = df_x_num.to_numpy(dtype=np.float64)
         matrix_y = df_y_num.to_numpy(dtype=np.float64)
         name_features = list(df_x_num.columns)
+
+        # Record pass-through continuous and discrete numeric features
+        int_cols = {
+            "YearBuilt", "YearRemodAdd", "GarageYrBlt", "BedroomAbvGr", "KitchenAbvGr",
+            "TotRmsAbvGrd", "Fireplaces", "GarageCars", "FullBath", "HalfBath",
+            "BsmtFullBath", "BsmtHalfBath", "OverallQual", "OverallCond", "MoSold"
+        }
+        for feat in name_features:
+            if feat not in recorder._processed_names:
+                type_feat = "int" if feat in int_cols else "float"
+                recorder.record_feature(
+                    name_processed=feat,
+                    source_original=feat,
+                    type_feature=type_feat
+                )
+            # end if
+        # end for feat
+
+        # Record removed raw columns
+        used_raw_sources: ty.Set[str] = set(dict_onehot_lineage.keys())
+        for item in recorder.get_feature_items(include_removed=False):
+            if item.feature_original.startswith("[") and item.feature_original.endswith("]"):
+                for raw_col in df_raw.columns:
+                    if f"'{raw_col}'" in item.feature_original or f'"{raw_col}"' in item.feature_original:
+                        used_raw_sources.add(raw_col)
+                    # end if
+                # end for raw_col
+            else:
+                used_raw_sources.add(item.feature_original)
+            # end if
+        # end for item
+
+        removed_cols = sorted(list(set(df_raw.columns) - used_raw_sources))
+        for rem_col in removed_cols:
+            recorder.record_removed(source_original=rem_col)
+        # end for rem_col
+
+        self._feature_operations = recorder.get_feature_items(include_removed=True)
 
         limit_records = (
             max_records_per_distribution
@@ -126,7 +194,32 @@ class AmesHousingPreprocessor(BaseDatasetPreprocessor):
                 "num_features": int(matrix_x.shape[1]),
                 "label_x_description": f"Pre-Crash Market ({self.config.years_pre_crash})",
                 "label_y_description": f"Post-Crash Market ({self.config.years_post_crash})",
+                "feature_operations": [f.model_dump() for f in self._feature_operations]
             }
         )
         # end def prepare_two_sample_data
+
+    def track_feature_operations(
+        self,
+        container: ty.Optional[TwoSampleDataContainer] = None,
+        include_removed: bool = True
+    ) -> ty.List[ty.Any]:
+        """Tracks the lineage, source columns, and data types of all Ames Housing processed features.
+
+        Args:
+            container: Optional preprocessed container.
+            include_removed: Whether to include removed raw features.
+
+        Returns:
+            List of FeatureItemData specifications stored during preprocessing.
+        """
+        if self._feature_operations is None:
+            self.prepare_two_sample_data(apply_subsampling=False)
+        # end if
+
+        if include_removed:
+            return list(self._feature_operations)
+        # end if
+        return [f for f in self._feature_operations if f.type_feature != "removed"]
+        # end def track_feature_operations
 # end class AmesHousingPreprocessor

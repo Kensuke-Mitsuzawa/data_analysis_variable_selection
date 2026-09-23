@@ -1,0 +1,59 @@
+# Ames Housing Dataset Variable Selection & Analysis Configuration
+
+[project]
+output_directory = "/root/data_analysis_variable_selection/outputs/ames_housing_run_mmd_cv"
+database_file = "analysis_warehouse.duckdb"
+dataset_name = "ames_housing"
+
+[dataset.ames_housing]
+raw_data_path = "/root/data_analysis_variable_selection/data/ames_housing_raw.csv"
+url_download = "https://www.openml.org/data/get_csv/21785545/ames_housing.csv"
+max_records_per_distribution = 500
+random_seed_sampling = 42
+
+[variable_detection]
+method = "mmd"                          # Choose "mmd" or "wasserstein"
+
+[variable_detection.mmd]
+algorithm = "mmd_cv"             # "algorithm_one" or "mmd_cv"
+max_epochs = 9999                # Epochs for ARD weights optimization
+top_k_fallback = 5
+
+# MMD-CV specific parameters:
+n_cv_subsampling = 5             # Number of cross-validation / subsampling folds (default: 5)
+subsampling_ratio = 0.8          # Subsample ratio of records per fold (default: 0.8)
+cv_stability_threshold = 0.5     # Selection frequency threshold to retain stable features (default: 0.5)
+
+# device option
+device = "cuda"                   # Use NVIDIA GPU ("cuda")
+use_fused_kernel = true           # Enable fused Triton CUDA kernel for speed
+# Concurrency and distributed options
+is_use_local_dask_cluster = true  # Launches local concurrent Dask workers
+dask_n_workers = 4                # Number of Dask worker processes (configurable)
+dask_threads_per_worker = 2       # Threads per Dask worker (configurable)
+# dask_memory_limit = 0           # Memory limit per worker (0 for unlimited, or e.g. "4GB")
+# dask_dashboard_address = ":8787"# Dask status dashboard address
+# dask_scheduler_host = "localhost"
+# dask_scheduler_port = 8786
+
+# Random seed for reproducible splitting & subsampling
+random_seed = 42
+
+[variable_detection.wasserstein]
+distributed_backend = "dask"          # "single", "joblib", or "dask"
+variable_detection_approach = "hist_based"
+threshold_weights = 0.1
+top_k_fallback = 5
+
+[variable_analysis]
+correlation_method = "graphical_lasso"          # "pearson" or "graphical_lasso"
+correlation_threshold = 0.2
+num_clusters = 5
+sample_scope = "subset"                         # "subset" (default) or "whole" (subset avoids Graphical Lasso RAM spikes)
+
+[report]
+report_title = "Ames Housing Variable Selection Analysis Report"
+sample_scope = "whole"                          # "whole" (default) or "subset" (runs radar, marginals, and prototypes on whole dataset)
+export_excel = true
+export_plots = true
+export_markdown = true

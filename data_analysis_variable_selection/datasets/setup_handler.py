@@ -9,6 +9,7 @@ from pathlib import Path
 from ..cli.cli_config import PipelineCliConfig
 from .ames_housing.loader import AmesHousingDataLoader
 from .speed_dating.loader import SpeedDatingDataLoader
+from .feature_tracker import FeatureItemData
 
 logger = logging.getLogger(__name__)
 

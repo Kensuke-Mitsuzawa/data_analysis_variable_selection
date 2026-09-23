@@ -8,6 +8,7 @@ from .base_report_generator import (
     DatasetReportArtifacts,
 )
 from .setup_handler import DatasetSetupHandler
+from .feature_tracker import FeatureOperationTracker, FeatureItemData, FeatureOperationRecorder
 
 __all__ = [
     "BaseDatasetReportGenerator",
@@ -16,4 +17,7 @@ __all__ = [
     "MissingnessSummary",
     "DatasetReportArtifacts",
     "DatasetSetupHandler",
+    "FeatureOperationTracker",
+    "FeatureItemData",
+    "FeatureOperationRecorder",
 ]

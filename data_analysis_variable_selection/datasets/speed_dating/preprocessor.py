@@ -45,6 +45,7 @@ class SpeedDatingPreprocessor(BaseDatasetPreprocessor):
         self.pair_builder = SpeedDatingPairBuilder()
         self.encoder = SpeedDatingFeatureEncoder()
         self.splitter = SpeedDatingLabelSplitter()
+        self._feature_operations: ty.Optional[ty.List[ty.Any]] = None
         # end def __init__
 
     def prepare_two_sample_data(
@@ -68,6 +69,10 @@ class SpeedDatingPreprocessor(BaseDatasetPreprocessor):
         path_to_load = path_data or self.config.path_data_file
         df_raw = self.loader.load_data_raw(path_source=path_to_load)
 
+        from ..feature_tracker import FeatureOperationRecorder
+
+        recorder = FeatureOperationRecorder()
+
         # 1. Clean survey fields and impute missing ratings
         df_clean = self.cleaner.clean_dataset_survey_fields(df_raw, self.config)
 
@@ -75,7 +80,7 @@ class SpeedDatingPreprocessor(BaseDatasetPreprocessor):
         df_pairs = self.pair_builder.build_pairs_reciprocal(df_clean)
 
         # 3. Construct joint profile vectors and homophily interaction features
-        df_joint = self.encoder.encode_features_joint(df_pairs, self.config)
+        df_joint = self.encoder.encode_features_joint(df_pairs, self.config, recorder=recorder)
 
         # 4. Partition into Distribution X (match = 1) and Distribution Y (match = 0)
         df_x, df_y = self.splitter.split_samples_by_match(df_joint)
@@ -88,6 +93,30 @@ class SpeedDatingPreprocessor(BaseDatasetPreprocessor):
         matrix_x = df_x.to_numpy(dtype=np.float64)
         matrix_y = df_y.to_numpy(dtype=np.float64)
         name_features = all_cols
+
+        # Record removed raw columns
+        used_sources: ty.Set[str] = set()
+        for item in recorder.get_feature_items(include_removed=False):
+            if item.feature_original.startswith("[") and item.feature_original.endswith("]"):
+                for c in df_raw.columns:
+                    if f"'{c}'" in item.feature_original or f'"{c}"' in item.feature_original:
+                        used_sources.add(c)
+                    # end if
+                # end for c
+            else:
+                used_sources.add(item.feature_original)
+            # end if
+        # end for item
+
+        # Also account for columns merged/transformed into pairs
+        used_sources.add("field_cd")
+
+        removed_cols = sorted(list(set(df_raw.columns) - used_sources))
+        for rem_col in removed_cols:
+            recorder.record_removed(source_original=rem_col)
+        # end for rem_col
+
+        self._feature_operations = recorder.get_feature_items(include_removed=True)
 
         limit_records = (
             max_records_per_distribution
@@ -124,7 +153,32 @@ class SpeedDatingPreprocessor(BaseDatasetPreprocessor):
                 "num_features": int(matrix_x.shape[1]),
                 "label_x_description": "Mutual Match (X: match = 1)",
                 "label_y_description": "No Mutual Match (Y: match = 0)",
+                "feature_operations": [f.model_dump() for f in self._feature_operations]
             }
         )
         # end def prepare_two_sample_data
+
+    def track_feature_operations(
+        self,
+        container: ty.Optional[TwoSampleDataContainer] = None,
+        include_removed: bool = True
+    ) -> ty.List[ty.Any]:
+        """Tracks the lineage, source columns, and data types of all Speed Dating processed features.
+
+        Args:
+            container: Optional preprocessed container.
+            include_removed: Whether to include removed raw features.
+
+        Returns:
+            List of FeatureItemData specifications stored during preprocessing.
+        """
+        if self._feature_operations is None:
+            self.prepare_two_sample_data(apply_subsampling=False)
+        # end if
+
+        if include_removed:
+            return list(self._feature_operations)
+        # end if
+        return [f for f in self._feature_operations if f.type_feature != "removed"]
+        # end def track_feature_operations
 # end class SpeedDatingPreprocessor

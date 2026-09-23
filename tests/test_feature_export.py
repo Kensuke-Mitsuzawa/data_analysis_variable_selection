@@ -1,0 +1,212 @@
+import os
+import tempfile
+import pytest
+from pathlib import Path
+
+from data_analysis_variable_selection.cli.cli_config import load_toml_config
+from data_analysis_variable_selection.datasets.feature_tracker import FeatureOperationTracker, FeatureItemData
+from data_analysis_variable_selection.datasets.setup_handler import DatasetSetupHandler
+from data_analysis_variable_selection.datasets.speed_dating.config import SpeedDatingPreprocessingConfig
+from data_analysis_variable_selection.datasets.speed_dating.preprocessor import SpeedDatingPreprocessor
+from data_analysis_variable_selection.datasets.ames_housing.config import AmesPreprocessingConfig
+from data_analysis_variable_selection.datasets.ames_housing.preprocessor import AmesHousingPreprocessor
+
+
+def test_speed_dating_feature_list_extraction():
+    """Verify speed dating feature list contains all 95 active features, removed features, and valid 3-column attributes."""
+    cfg = load_toml_config("plans/config_speed_dating_mmd_cv.toml")
+    preprocessor = SpeedDatingPreprocessor()
+    tracker = FeatureOperationTracker()
+
+    # 1. Verify active features only
+    active_features = tracker.track_features_dataset(preprocessor=preprocessor, config=cfg, include_removed=False)
+    assert len(active_features) == 95
+    feature_dict = {f.feature_processed: f for f in active_features}
+
+    # Verify combined features are formatted as list expressions
+    assert "Delta_Male_Attr_Align" in feature_dict
+    assert feature_dict["Delta_Male_Attr_Align"].feature_original == "['attr3_1', 'attr1_1']"
+    assert feature_dict["Delta_Male_Attr_Align"].type_feature == "float"
+
+    assert "Delta_Female_Intel_Align" in feature_dict
+    assert feature_dict["Delta_Female_Intel_Align"].feature_original == "['intel3_1', 'intel1_1']"
+    assert feature_dict["Delta_Female_Intel_Align"].type_feature == "float"
+
+    assert "Race_Preference_Conflict" in feature_dict
+    assert feature_dict["Race_Preference_Conflict"].feature_original == "['race', 'imprace']"
+    assert feature_dict["Race_Preference_Conflict"].type_feature == "float"
+
+    assert "Interest_Cosine_Sim" in feature_dict
+    assert feature_dict["Interest_Cosine_Sim"].feature_original.startswith("['")
+    assert feature_dict["Interest_Cosine_Sim"].feature_original.endswith("']")
+    assert feature_dict["Interest_Cosine_Sim"].type_feature == "float"
+
+    # Verify single features
+    assert "Age_Gap" in feature_dict
+    assert feature_dict["Age_Gap"].feature_original == "age"
+    assert feature_dict["Age_Gap"].type_feature == "float"
+
+    assert "Same_Race" in feature_dict
+    assert feature_dict["Same_Race"].feature_original == "race"
+    assert feature_dict["Same_Race"].type_feature == "category"
+
+    assert "Male_age" in feature_dict
+    assert feature_dict["Male_age"].feature_original == "age"
+    assert feature_dict["Male_age"].type_feature == "int"
+
+    # Check valid types across all active features
+    valid_active_types = {"int", "float", "category", "str"}
+    for f in active_features:
+        assert f.type_feature in valid_active_types, f"Invalid type {f.type_feature} for {f.feature_processed}"
+    # end for
+
+    # 2. Verify all features with include_removed=True (default)
+    all_features = tracker.track_features_dataset(preprocessor=preprocessor, config=cfg, include_removed=True)
+    assert len(all_features) > 95
+    removed_features = [f for f in all_features if f.feature_processed == "removed"]
+    assert len(removed_features) > 150
+    for rem in removed_features:
+        assert rem.feature_processed == "removed"
+        assert rem.type_feature == "removed"
+    # end for
+    removed_cols = {f.feature_original for f in removed_features}
+    assert "dec" in removed_cols
+    assert "id" in removed_cols
+    assert "match" in removed_cols
+# end def test_speed_dating_feature_list_extraction
+
+
+def test_ames_housing_feature_list_extraction():
+    """Verify Ames Housing feature list contains 243/244 features, removed features, and valid 3-column attributes."""
+    cfg = load_toml_config("plans/config_ames_housing_mmd_cv.toml")
+    preprocessor = AmesHousingPreprocessor()
+    tracker = FeatureOperationTracker()
+
+    # 1. Verify active features only
+    active_features = tracker.track_features_dataset(preprocessor=preprocessor, config=cfg, include_removed=False)
+    assert len(active_features) in {243, 244}
+    feature_dict = {f.feature_processed: f for f in active_features}
+
+    # Verify LotFrontage combines LotFrontage and Neighborhood as list expression
+    assert "LotFrontage" in feature_dict
+    assert feature_dict["LotFrontage"].feature_original == "['LotFrontage', 'Neighborhood']"
+    assert feature_dict["LotFrontage"].type_feature == "float"
+
+    # Verify one-hot category feature
+    assert "Neighborhood_CollgCr" in feature_dict
+    assert feature_dict["Neighborhood_CollgCr"].feature_original == "Neighborhood"
+    assert feature_dict["Neighborhood_CollgCr"].type_feature == "category"
+
+    # Verify ordinal integer feature
+    assert "OverallQual" in feature_dict
+    assert feature_dict["OverallQual"].type_feature == "int"
+
+    # Check valid types across all active features
+    valid_active_types = {"int", "float", "category", "str"}
+    for f in active_features:
+        assert f.type_feature in valid_active_types, f"Invalid type {f.type_feature} for {f.feature_processed}"
+    # end for
+
+    # 2. Verify all features with include_removed=True (default)
+    all_features = tracker.track_features_dataset(preprocessor=preprocessor, config=cfg, include_removed=True)
+    assert len(all_features) >= 247
+    removed_features = [f for f in all_features if f.feature_processed == "removed"]
+    assert len(removed_features) >= 4
+    for rem in removed_features:
+        assert rem.feature_processed == "removed"
+        assert rem.type_feature == "removed"
+    # end for
+    removed_cols = {f.feature_original for f in removed_features}
+    assert {"SalePrice", "Id", "YrSold", "MoSold"}.issubset(removed_cols)
+# end def test_ames_housing_feature_list_extraction
+
+
+def test_export_feature_list_markdown_speed_dating():
+    """Verify export_feature_list_markdown produces valid markdown with the required 3 columns and removed notation."""
+    cfg = load_toml_config("plans/config_speed_dating_mmd_cv.toml")
+    preprocessor = SpeedDatingPreprocessor()
+    tracker = FeatureOperationTracker()
+    list_features = tracker.track_features_dataset(preprocessor=preprocessor, config=cfg)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        path_md = os.path.join(tmp_dir, "features.md")
+        result_path = tracker.export_feature_list_markdown(
+            list_features=list_features,
+            config=cfg,
+            path_output_markdown=path_md
+        )
+
+        assert os.path.exists(result_path)
+        with open(result_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        # end with
+
+        # Verify header metadata
+        assert "Generation Date" in content
+        assert "Git Commit ID" in content
+        assert "Source URL" in content
+        assert "kaggle.com" in content
+
+        # Verify table header with exact 3 required columns
+        assert "| processed feature | original feature | type of the processed feature |" in content
+        assert "| :--- | :--- | :--- |" in content
+
+        # Verify sample active rows
+        assert "| Age_Gap | age | float |" in content
+        assert "| Delta_Female_Attr_Align | ['attr3_1', 'attr1_1'] | float |" in content
+        assert "| Race_Preference_Conflict | ['race', 'imprace'] | float |" in content
+        assert "| Same_Race | race | category |" in content
+
+        # Verify removed feature notation
+        assert "| removed | match | removed |" in content
+        assert "| removed | dec | removed |" in content
+    # end with
+# end def test_export_feature_list_markdown_speed_dating
+
+
+def test_export_feature_list_markdown_ames_housing():
+    """Verify export_feature_list_markdown for Ames Housing produces valid markdown with required 3 columns and removed notation."""
+    cfg = load_toml_config("plans/config_ames_housing_mmd_cv.toml")
+    preprocessor = AmesHousingPreprocessor()
+    tracker = FeatureOperationTracker()
+    list_features = tracker.track_features_dataset(preprocessor=preprocessor, config=cfg)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        path_md = os.path.join(tmp_dir, "features.md")
+        result_path = tracker.export_feature_list_markdown(
+            list_features=list_features,
+            config=cfg,
+            path_output_markdown=path_md
+        )
+
+        assert os.path.exists(result_path)
+        with open(result_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        # end with
+
+        # Verify header metadata
+        assert "Generation Date" in content
+        assert "Git Commit ID" in content
+        assert "Source URL" in content
+
+        # Verify table header with exact 3 required columns
+        assert "| processed feature | original feature | type of the processed feature |" in content
+        assert "| :--- | :--- | :--- |" in content
+
+        # Verify sample active rows
+        assert "| LotFrontage | ['LotFrontage', 'Neighborhood'] | float |" in content
+        assert "| Neighborhood_CollgCr | Neighborhood | category |" in content
+        assert "| OverallQual | OverallQual | int |" in content
+
+        # Verify removed feature notation
+        assert "| removed | SalePrice | removed |" in content
+        assert "| removed | YrSold | removed |" in content
+    # end with
+# end def test_export_feature_list_markdown_ames_housing
+
+
+def test_setup_handler_does_not_export_markdown():
+    """Verify DatasetSetupHandler does not perform feature markdown export."""
+    handler = DatasetSetupHandler()
+    assert not hasattr(handler, "export_feature_list_markdown")
+# end def test_setup_handler_does_not_export_markdown

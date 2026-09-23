@@ -15,13 +15,15 @@ class SpeedDatingFeatureEncoder:
     def encode_features_joint(
         self,
         df_pairs: pd.DataFrame,
-        config: SpeedDatingPreprocessingConfig
+        config: SpeedDatingPreprocessingConfig,
+        recorder: ty.Optional[ty.Any] = None
     ) -> pd.DataFrame:
         """Constructs joint profile vectors and interaction difference features.
 
         Args:
             df_pairs: Paired DataFrame from SpeedDatingPairBuilder.
             config: SpeedDatingPreprocessingConfig instance.
+            recorder: Optional FeatureOperationRecorder to record transformations.
 
         Returns:
             DataFrame containing joint features and the 'match' outcome column.
@@ -39,14 +41,37 @@ class SpeedDatingFeatureEncoder:
             + config.columns_stated_preferences
         )
 
+        int_demographics = {"age", "imprace", "imprelig", "date", "go_out"}
         for col in core_columns:
+            if col in config.columns_interests or col in config.columns_self_ratings or col in int_demographics:
+                type_feat = "int"
+            elif col in {"goal", "field_cd"}:
+                type_feat = "category"
+            else:
+                type_feat = "float"
+            # end if
+
             col_m = f"{col}_male"
             col_f = f"{col}_female"
             if col_m in df_pairs.columns:
                 dict_features[f"Male_{col}"] = df_pairs[col_m].astype(float).values
+                if recorder is not None:
+                    recorder.record_feature(
+                        name_processed=f"Male_{col}",
+                        source_original=col,
+                        type_feature=type_feat
+                    )
+                # end if
             # end if
             if col_f in df_pairs.columns:
                 dict_features[f"Female_{col}"] = df_pairs[col_f].astype(float).values
+                if recorder is not None:
+                    recorder.record_feature(
+                        name_processed=f"Female_{col}",
+                        source_original=col,
+                        type_feature=type_feat
+                    )
+                # end if
             # end if
         # end for col
 
@@ -55,17 +80,38 @@ class SpeedDatingFeatureEncoder:
             dict_features["Age_Gap"] = np.abs(
                 df_pairs["age_male"].astype(float).values - df_pairs["age_female"].astype(float).values
             )
+            if recorder is not None:
+                recorder.record_feature(
+                    name_processed="Age_Gap",
+                    source_original="age",
+                    type_feature="float"
+                )
+            # end if
         # end if
 
         if "race_male" in df_pairs.columns and "race_female" in df_pairs.columns:
             same_race = (df_pairs["race_male"] == df_pairs["race_female"]).astype(float).values
             dict_features["Same_Race"] = same_race
+            if recorder is not None:
+                recorder.record_feature(
+                    name_processed="Same_Race",
+                    source_original="race",
+                    type_feature="category"
+                )
+            # end if
 
             if "imprace_male" in df_pairs.columns and "imprace_female" in df_pairs.columns:
                 avg_imprace = (
                     df_pairs["imprace_male"].astype(float).values + df_pairs["imprace_female"].astype(float).values
                 ) / 2.0
                 dict_features["Race_Preference_Conflict"] = (1.0 - same_race) * avg_imprace
+                if recorder is not None:
+                    recorder.record_feature(
+                        name_processed="Race_Preference_Conflict",
+                        source_original=["race", "imprace"],
+                        type_feature="float"
+                    )
+                # end if
             # end if
         # end if
 
@@ -73,12 +119,26 @@ class SpeedDatingFeatureEncoder:
             dict_features["Same_Goal"] = (
                 df_pairs["goal_male"] == df_pairs["goal_female"]
             ).astype(float).values
+            if recorder is not None:
+                recorder.record_feature(
+                    name_processed="Same_Goal",
+                    source_original="goal",
+                    type_feature="category"
+                )
+            # end if
         # end if
 
         if "field_cd_male" in df_pairs.columns and "field_cd_female" in df_pairs.columns:
             dict_features["Same_Field"] = (
                 df_pairs["field_cd_male"] == df_pairs["field_cd_female"]
             ).astype(float).values
+            if recorder is not None:
+                recorder.record_feature(
+                    name_processed="Same_Field",
+                    source_original="field_cd",
+                    type_feature="category"
+                )
+            # end if
         # end if
 
         # 3. Leisure & Activity Differences (17 domains)
@@ -95,6 +155,13 @@ class SpeedDatingFeatureEncoder:
                 dict_features[f"Diff_{inter}"] = np.abs(vals_m - vals_f)
                 m_interests_matrix.append(vals_m)
                 f_interests_matrix.append(vals_f)
+                if recorder is not None:
+                    recorder.record_feature(
+                        name_processed=f"Diff_{inter}",
+                        source_original=inter,
+                        type_feature="float"
+                    )
+                # end if
             # end if
         # end for inter
 
@@ -103,6 +170,13 @@ class SpeedDatingFeatureEncoder:
             mat_m = np.column_stack(m_interests_matrix)
             mat_f = np.column_stack(f_interests_matrix)
             dict_features["Interest_Cosine_Sim"] = self.compute_similarity_interest_cosine(mat_m, mat_f)
+            if recorder is not None:
+                recorder.record_feature(
+                    name_processed="Interest_Cosine_Sim",
+                    source_original=sorted(interest_names),
+                    type_feature="float"
+                )
+            # end if
         # end if
 
         # 5. Preference-Trait Alignment Deltas
@@ -112,6 +186,13 @@ class SpeedDatingFeatureEncoder:
             dict_features["Delta_Male_Attr_Align"] = np.abs(
                 df_pairs["attr3_1_male"].astype(float).values - pref_attr_f
             )
+            if recorder is not None:
+                recorder.record_feature(
+                    name_processed="Delta_Male_Attr_Align",
+                    source_original=["attr3_1", "attr1_1"],
+                    type_feature="float"
+                )
+            # end if
         # end if
 
         if "attr3_1_female" in df_pairs.columns and "attr1_1_male" in df_pairs.columns:
@@ -119,6 +200,13 @@ class SpeedDatingFeatureEncoder:
             dict_features["Delta_Female_Attr_Align"] = np.abs(
                 df_pairs["attr3_1_female"].astype(float).values - pref_attr_m
             )
+            if recorder is not None:
+                recorder.record_feature(
+                    name_processed="Delta_Female_Attr_Align",
+                    source_original=["attr3_1", "attr1_1"],
+                    type_feature="float"
+                )
+            # end if
         # end if
 
         if "intel3_1_male" in df_pairs.columns and "intel1_1_female" in df_pairs.columns:
@@ -126,6 +214,13 @@ class SpeedDatingFeatureEncoder:
             dict_features["Delta_Male_Intel_Align"] = np.abs(
                 df_pairs["intel3_1_male"].astype(float).values - pref_intel_f
             )
+            if recorder is not None:
+                recorder.record_feature(
+                    name_processed="Delta_Male_Intel_Align",
+                    source_original=["intel3_1", "intel1_1"],
+                    type_feature="float"
+                )
+            # end if
         # end if
 
         if "intel3_1_female" in df_pairs.columns and "intel1_1_male" in df_pairs.columns:
@@ -133,6 +228,13 @@ class SpeedDatingFeatureEncoder:
             dict_features["Delta_Female_Intel_Align"] = np.abs(
                 df_pairs["intel3_1_female"].astype(float).values - pref_intel_m
             )
+            if recorder is not None:
+                recorder.record_feature(
+                    name_processed="Delta_Female_Intel_Align",
+                    source_original=["intel3_1", "intel1_1"],
+                    type_feature="float"
+                )
+            # end if
         # end if
 
         df_joint = pd.DataFrame(dict_features)
