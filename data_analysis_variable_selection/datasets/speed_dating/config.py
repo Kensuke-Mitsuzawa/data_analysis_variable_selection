@@ -32,8 +32,8 @@ class SpeedDatingPreprocessingConfig(BaseModel):
         description="Whether to include post-date ratings (e.g. like, attr). Default False to avoid evaluative tautology."
     )
     columns_demographics: ty.List[str] = Field(
-        default_factory=lambda: ["age", "imprace", "imprelig", "date", "go_out", "goal", "exphappy", "expnum"],
-        description="Demographic, lifestyle, and expectation survey features."
+        default_factory=lambda: ["age", "imprace", "imprelig", "date", "go_out", "goal", "exphappy", "expnum", "career_c"],
+        description="Demographic, lifestyle, career, and expectation survey features."
     )
     columns_interests: ty.List[str] = Field(
         default_factory=lambda: [

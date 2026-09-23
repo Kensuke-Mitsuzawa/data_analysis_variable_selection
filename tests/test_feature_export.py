@@ -20,7 +20,7 @@ def test_speed_dating_feature_list_extraction():
 
     # 1. Verify active features only
     active_features = tracker.track_features_dataset(preprocessor=preprocessor, config=cfg, include_removed=False)
-    assert len(active_features) == 47
+    assert len(active_features) == 49
     feature_dict = {f.feature_processed: f for f in active_features}
 
     # Verify combined features are formatted as list expressions
@@ -41,10 +41,36 @@ def test_speed_dating_feature_list_extraction():
     assert feature_dict["Interest_Cosine_Sim"].feature_original.endswith("']")
     assert feature_dict["Interest_Cosine_Sim"].type_feature == "float"
 
+    # Verify career tiers and field similarity
+    assert "career_group_male" in feature_dict
+    assert feature_dict["career_group_male"].feature_original == "career_c"
+    assert feature_dict["career_group_male"].type_feature == "int"
+
+    assert "career_group_female" in feature_dict
+    assert feature_dict["career_group_female"].feature_original == "career_c"
+    assert feature_dict["career_group_female"].type_feature == "int"
+
+    assert "Field_Similarity" in feature_dict
+    assert feature_dict["Field_Similarity"].feature_original == "field_cd"
+    assert feature_dict["Field_Similarity"].type_feature == "float"
+
+    # Verify Same_region
+    assert "Same_region" in feature_dict
+    assert feature_dict["Same_region"].feature_original == "zipcode"
+    assert feature_dict["Same_region"].type_feature == "category"
+
     # Verify diff features for age, interests, traits, and survey expectations
     assert "Diff_age" in feature_dict
     assert feature_dict["Diff_age"].feature_original == "age"
     assert feature_dict["Diff_age"].type_feature == "float"
+
+    assert "Diff_imprace" in feature_dict
+    assert feature_dict["Diff_imprace"].feature_original == "imprace"
+    assert feature_dict["Diff_imprace"].type_feature == "float"
+
+    assert "Diff_imprelig" in feature_dict
+    assert feature_dict["Diff_imprelig"].feature_original == "imprelig"
+    assert feature_dict["Diff_imprelig"].type_feature == "float"
 
     assert "Diff_art" in feature_dict
     assert feature_dict["Diff_art"].feature_original == "art"
@@ -81,6 +107,10 @@ def test_speed_dating_feature_list_extraction():
     # Verify individual gender features were removed
     assert "Male_age" not in feature_dict
     assert "Female_age" not in feature_dict
+    assert "Male_imprace" not in feature_dict
+    assert "Female_imprace" not in feature_dict
+    assert "Male_imprelig" not in feature_dict
+    assert "Female_imprelig" not in feature_dict
     assert "Male_art" not in feature_dict
     assert "Female_art" not in feature_dict
     assert "Male_attr1_1" not in feature_dict
@@ -187,6 +217,8 @@ def test_export_feature_list_markdown_speed_dating():
 
         # Verify sample active diff rows
         assert "| Diff_age | age | float |" in content
+        assert "| Diff_imprace | imprace | float |" in content
+        assert "| Diff_imprelig | imprelig | float |" in content
         assert "| Diff_goal | goal | float |" in content
         assert "| Diff_date | date | float |" in content
         assert "| Diff_exphappy | exphappy | float |" in content
@@ -194,6 +226,10 @@ def test_export_feature_list_markdown_speed_dating():
         assert "| Delta_Female_Attr_Align | ['attr3_1', 'attr1_1'] | float |" in content
         assert "| Race_Preference_Conflict | ['race', 'imprace'] | float |" in content
         assert "| Same_Race | race | category |" in content
+        assert "| Same_region | zipcode | category |" in content
+        assert "| career_group_male | career_c | int |" in content
+        assert "| career_group_female | career_c | int |" in content
+        assert "| Field_Similarity | field_cd | float |" in content
 
         # Verify removed feature notation
         assert "| removed | match | removed |" in content

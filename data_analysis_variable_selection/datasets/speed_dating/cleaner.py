@@ -68,7 +68,7 @@ class SpeedDatingDataCleaner:
         df_clean = self.impute_missing_ratings_median(df_clean, impute_median_cols)
 
         # 2. Impute nominal categorical columns via mode
-        impute_mode_cols = ["goal", "race", "field_cd"]
+        impute_mode_cols = ["goal", "race", "field_cd", "career_c"]
         df_clean = self.impute_missing_categoricals_mode(df_clean, impute_mode_cols)
 
         return df_clean

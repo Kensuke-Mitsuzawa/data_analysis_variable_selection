@@ -123,33 +123,57 @@ class SpeedDatingFeatureEncoder:
             # end if
         # end for s_col
 
-        # 6. Demographics Pass-Through (imprace, imprelig)
+        # 6. Demographics Differences (imprace, imprelig)
         for col in ["imprace", "imprelig"]:
             col_m = f"{col}_male"
             col_f = f"{col}_female"
-            if col_m in df_pairs.columns:
-                dict_features[f"Male_{col}"] = df_pairs[col_m].astype(float).values
+            if col_m in df_pairs.columns and col_f in df_pairs.columns:
+                vals_m = df_pairs[col_m].astype(float).values
+                vals_f = df_pairs[col_f].astype(float).values
+                dict_features[f"Diff_{col}"] = np.abs(vals_m - vals_f)
                 if recorder is not None:
                     recorder.record_feature(
-                        name_processed=f"Male_{col}",
+                        name_processed=f"Diff_{col}",
                         source_original=col,
-                        type_feature="int"
-                    )
-                # end if
-            # end if
-            if col_f in df_pairs.columns:
-                dict_features[f"Female_{col}"] = df_pairs[col_f].astype(float).values
-                if recorder is not None:
-                    recorder.record_feature(
-                        name_processed=f"Female_{col}",
-                        source_original=col,
-                        type_feature="int"
+                        type_feature="float"
                     )
                 # end if
             # end if
         # end for col
 
-        # 7. Homophily & Agreement Indicators
+        # 7. Career Grouping (Tiers 1-5)
+        career_tier_map: ty.Dict[int, int] = {
+            1: 1, 4: 1, 7: 1,
+            5: 2, 17: 2,
+            2: 3, 3: 3, 9: 3, 11: 3, 12: 3, 13: 3, 16: 3,
+            6: 4, 8: 4, 14: 4,
+            10: 5, 15: 5,
+        }
+        if "career_c_male" in df_pairs.columns:
+            m_codes = pd.to_numeric(df_pairs["career_c_male"], errors="coerce").fillna(10).astype(int)
+            dict_features["career_group_male"] = m_codes.map(career_tier_map).fillna(5).astype(int).values
+            if recorder is not None:
+                recorder.record_feature(
+                    name_processed="career_group_male",
+                    source_original="career_c",
+                    type_feature="int"
+                )
+            # end if
+        # end if
+
+        if "career_c_female" in df_pairs.columns:
+            f_codes = pd.to_numeric(df_pairs["career_c_female"], errors="coerce").fillna(10).astype(int)
+            dict_features["career_group_female"] = f_codes.map(career_tier_map).fillna(5).astype(int).values
+            if recorder is not None:
+                recorder.record_feature(
+                    name_processed="career_group_female",
+                    source_original="career_c",
+                    type_feature="int"
+                )
+            # end if
+        # end if
+
+        # 8. Homophily & Agreement Indicators
         if "race_male" in df_pairs.columns and "race_female" in df_pairs.columns:
             same_race = (df_pairs["race_male"] == df_pairs["race_female"]).astype(float).values
             dict_features["Same_Race"] = same_race
@@ -200,9 +224,35 @@ class SpeedDatingFeatureEncoder:
                     type_feature="category"
                 )
             # end if
+
+            dict_features["Field_Similarity"] = self.compute_field_similarity(
+                df_pairs["field_cd_male"],
+                df_pairs["field_cd_female"]
+            )
+            if recorder is not None:
+                recorder.record_feature(
+                    name_processed="Field_Similarity",
+                    source_original="field_cd",
+                    type_feature="float"
+                )
+            # end if
         # end if
 
-        # 8. Preference-Trait Alignment Deltas
+        if "zipcode_male" in df_pairs.columns and "zipcode_female" in df_pairs.columns:
+            dict_features["Same_region"] = self.compute_same_region(
+                df_pairs["zipcode_male"],
+                df_pairs["zipcode_female"]
+            )
+            if recorder is not None:
+                recorder.record_feature(
+                    name_processed="Same_region",
+                    source_original="zipcode",
+                    type_feature="category"
+                )
+            # end if
+        # end if
+
+        # 9. Preference-Trait Alignment Deltas
         # Normalize stated preference weights (summing to ~100) to 1-10 scale
         if "attr3_1_male" in df_pairs.columns and "attr1_1_female" in df_pairs.columns:
             pref_attr_f = df_pairs["attr1_1_female"].astype(float).values / 10.0
@@ -293,4 +343,117 @@ class SpeedDatingFeatureEncoder:
         similarity[zero_mask] = 0.0
         return np.clip(similarity, -1.0, 1.0)
         # end def compute_similarity_interest_cosine
+
+    def compute_field_similarity(
+        self,
+        series_male: pd.Series,
+        series_female: pd.Series
+    ) -> np.ndarray:
+        """Computes deterministic domain-knowledge similarity between two field codes.
+
+        Returns:
+            1.0: Exact field match
+            0.5: Different fields sharing the same epistemological macro-domain
+            0.0: Divergent macro-domains or missing/unclassified codes
+        """
+        arr_m = pd.to_numeric(series_male, errors="coerce").fillna(-1).astype(int).values
+        arr_f = pd.to_numeric(series_female, errors="coerce").fillna(-1).astype(int).values
+
+        unclassified = {12, 18, -1}
+        knowledge_domains = [
+            {2, 4, 5, 10},
+            {1, 3, 8, 9, 11, 13},
+            {6, 7, 16},
+            {14, 15, 17}
+        ]
+
+        n_samples = len(arr_m)
+        similarities = np.zeros(n_samples, dtype=np.float64)
+
+        for i in range(n_samples):
+            fm = arr_m[i]
+            ff = arr_f[i]
+
+            if fm in unclassified or ff in unclassified:
+                similarities[i] = 0.0
+                continue
+            # end if
+
+            if fm == ff:
+                similarities[i] = 1.0
+                continue
+            # end if
+
+            matched_domain = False
+            for domain_codes in knowledge_domains:
+                if fm in domain_codes and ff in domain_codes:
+                    similarities[i] = 0.5
+                    matched_domain = True
+                    break
+                # end if
+            # end for domain_codes
+
+            if not matched_domain:
+                similarities[i] = 0.0
+            # end if
+        # end for i
+
+        return similarities
+        # end def compute_field_similarity
+
+    @staticmethod
+    def zip_to_8_categories(zip_code: ty.Any) -> str:
+        """Extracts the first digit of a US ZIP code and aggregates
+        them into 8 broad geographic categories.
+        Handles numeric, string, and dirty input formats (e.g., ZIP+4).
+        """
+        if pd.isna(zip_code):
+            return "Unknown"
+        # end if
+
+        # Clean and zero-pad to handle missing leading zeros from numeric inputs
+        zip_str = str(zip_code).strip().replace(",", "").split("-")[0].split(".")[0]
+        if not zip_str:
+            return "Unknown"
+        # end if
+        zip_str = zip_str.zfill(5)
+
+        first_digit = zip_str[0]
+
+        mapping = {
+            "0": "Northeast",         # New England, NJ, PR
+            "1": "Northeast",         # NY, PA, DE
+            "2": "Mid-Atlantic",      # DC, MD, NC, SC, VA, WV
+            "3": "Southeast",         # AL, FL, GA, MS, TN
+            "4": "Southeast",         # IN, KY, MI, OH
+            "5": "Northern Plains",   # IA, MN, MT, ND, SD, WI
+            "6": "Central Plains",    # IL, KS, MO, NE
+            "7": "South Central",     # AR, LA, OK, TX
+            "8": "Mountain West",     # AZ, CO, ID, NM, NV, UT, WY
+            "9": "Pacific West",      # AK, CA, HI, OR, WA
+        }
+
+        return mapping.get(first_digit, "Other")
+        # end def zip_to_8_categories
+
+    def compute_same_region(
+        self,
+        series_male: pd.Series,
+        series_female: pd.Series
+    ) -> np.ndarray:
+        """Computes binary same-region indicator based on 8 geographic categories.
+
+        Args:
+            series_male: Male participant ZIP codes.
+            series_female: Female participant ZIP codes.
+
+        Returns:
+            Binary float ndarray: 1.0 if converted region is identical, 0.0 otherwise.
+        """
+        reg_m = series_male.apply(self.zip_to_8_categories)
+        reg_f = series_female.apply(self.zip_to_8_categories)
+        return (reg_m == reg_f).astype(float).values
+        # end def compute_same_region
 # end class SpeedDatingFeatureEncoder
+
+zip_to_8_categories = SpeedDatingFeatureEncoder.zip_to_8_categories
