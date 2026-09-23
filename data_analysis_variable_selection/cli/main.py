@@ -4,6 +4,8 @@ import sys
 import typing as ty
 import typer
 import numpy as np
+from pathlib import Path
+import shutil
 
 from .cli_config import PipelineCliConfig, load_toml_config
 from ..datasets.setup_handler import DatasetSetupHandler
@@ -12,6 +14,7 @@ from ..datasets.ames_housing.config import AmesPreprocessingConfig
 from ..datasets.ames_housing.preprocessor import AmesHousingPreprocessor
 from ..datasets.ames_housing.report_generator import AmesHousingReportGenerator
 from ..datasets.speed_dating.config import SpeedDatingPreprocessingConfig
+from ..datasets.speed_dating.preprocessor import SpeedDatingPreprocessor
 from ..datasets.speed_dating.report_generator import SpeedDatingReportGenerator
 from ..common.models import TwoSampleDataContainer, VariableSelectionResult, CorrelationResult, VariableClusteringResult, PrototypeSampleResult
 from ..common.scaler import ZScoreFeatureScaler
@@ -61,12 +64,22 @@ def configure_pipeline_logging(cfg: PipelineCliConfig) -> None:
     root_logger.addHandler(file_handler)
 # end def configure_pipeline_logging
 
-
 app = typer.Typer(
     name="cui_pipeline",
     help="Command-line user interface for Two-Sample Variable Selection & Analysis Pipeline.",
     add_completion=False,
 )
+
+
+def copy_config_file(path_toml_config: Path, cfg: PipelineCliConfig) -> None:
+    """Copy the TOML configuration file to the output directory.
+    Saving the original TOML configuration file for reproducibility.
+    """
+    path_destination_config = Path(cfg.project.output_directory) / "config.toml"
+    
+    shutil.copy2(path_toml_config, path_destination_config)
+    typer.echo(f"✓ Saved configuration to: {path_destination_config}")
+# end def copy_config_file
 
 
 @app.command("setup")
@@ -79,6 +92,7 @@ def cmd_setup(
     os.makedirs(cfg.project.output_directory, exist_ok=True)
     handler = DatasetSetupHandler()
     raw_path = handler.setup_dataset(cfg)
+    copy_config_file(config, cfg)
     typer.echo(f"✓ Setup complete. Verified raw dataset at: {raw_path}")
     # end def cmd_setup
 
@@ -100,6 +114,14 @@ def cmd_preprocess(
             random_seed_sampling=cfg.dataset.ames_housing.random_seed_sampling,
         )
         preprocessor = AmesHousingPreprocessor(config=ames_cfg)
+    elif dataset_name == "speed_dating":
+        sd_cfg = SpeedDatingPreprocessingConfig(
+            path_data_file=cfg.dataset.speed_dating.raw_data_path,
+            url_download=cfg.dataset.speed_dating.url_download,
+            max_records_per_distribution=cfg.dataset.speed_dating.max_records_per_distribution,
+            random_seed_sampling=cfg.dataset.speed_dating.random_seed_sampling,
+        )
+        preprocessor = SpeedDatingPreprocessor(config=sd_cfg)
     else:
         raise ValueError(f"Dataset '{dataset_name}' not yet supported for preprocessing.")
     # end if
@@ -122,6 +144,8 @@ def cmd_preprocess(
     )
     typer.echo(f"✓ Saved preprocessed human-readable table to DuckDB: {cfg.get_database_path()}")
     typer.echo(f"✓ Cached preprocessed arrays to: {npz_path}")
+
+    copy_config_file(config, cfg)
     # end def cmd_preprocess
 
 
@@ -151,6 +175,9 @@ def cmd_variable_detection(
     if cfg.project.dataset_name.lower().strip() == "ames_housing":
         limit_records = cfg.dataset.ames_housing.max_records_per_distribution
         seed = cfg.dataset.ames_housing.random_seed_sampling
+    elif cfg.project.dataset_name.lower().strip() == "speed_dating":
+        limit_records = cfg.dataset.speed_dating.max_records_per_distribution
+        seed = cfg.dataset.speed_dating.random_seed_sampling
     # end if
 
     if limit_records is not None and limit_records > 0:
@@ -244,6 +271,8 @@ def cmd_variable_detection(
         typer.echo(f"  - {name_var}: weight = {weight:.4f}")
     # end for
     logger.info("Persisting variable detection results to DuckDB. Done.")
+
+    copy_config_file(config, cfg)
     # end def cmd_variable_detection
 
 
@@ -272,6 +301,9 @@ def cmd_variable_analysis(
     if cfg.project.dataset_name.lower().strip() == "ames_housing":
         limit_records = cfg.dataset.ames_housing.max_records_per_distribution
         seed = cfg.dataset.ames_housing.random_seed_sampling
+    elif cfg.project.dataset_name.lower().strip() == "speed_dating":
+        limit_records = cfg.dataset.speed_dating.max_records_per_distribution
+        seed = cfg.dataset.speed_dating.random_seed_sampling
     # end if
 
     if "sub" in analysis_scope and limit_records is not None and limit_records > 0:
@@ -364,6 +396,8 @@ def cmd_variable_analysis(
         f"Found {len(clust_result.dict_cluster_to_variables)} variable clusters. "
         f"Augmented feature set (S_tilde) contains {len(clust_result.indices_augmented_s_tilde)} variables."
     )
+
+    copy_config_file(config, cfg)
     # end def cmd_variable_analysis
 
 
@@ -387,6 +421,8 @@ def _get_dataset_report_generator(cfg: PipelineCliConfig) -> BaseDatasetReportGe
     else:
         raise ValueError(f"Dataset '{dataset_name}' does not have a dataset report generator implemented.")
     # end if
+
+    copy_config_file(config, cfg)
     # end def _get_dataset_report_generator
 
 
@@ -422,6 +458,9 @@ def cmd_generate_report(
     if cfg.project.dataset_name.lower().strip() == "ames_housing":
         limit_records = cfg.dataset.ames_housing.max_records_per_distribution
         seed = cfg.dataset.ames_housing.random_seed_sampling
+    elif cfg.project.dataset_name.lower().strip() == "speed_dating":
+        limit_records = cfg.dataset.speed_dating.max_records_per_distribution
+        seed = cfg.dataset.speed_dating.random_seed_sampling
     # end if
 
     # 1. Resolve analysis container (for correlation matrix & clustering)
@@ -578,6 +617,8 @@ def cmd_generate_report(
     # end if
 
     db.close_connection_database()
+
+    copy_config_file(config, cfg)
     # end def cmd_generate_report
 
 
@@ -610,6 +651,8 @@ def cmd_generate_dataset_report(
     if artifacts_dataset.path_report_excel:
         typer.echo(f"✓ Generated dataset-specific Excel workbook at: {artifacts_dataset.path_report_excel}")
     # end if
+
+    copy_config_file(config, cfg)
     # end def cmd_generate_dataset_report
 
 

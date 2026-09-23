@@ -1,7 +1,7 @@
 # Speed Dating Experiment Dataset Variable Selection & Analysis Configuration
 
 [project]
-output_directory = "/root/data_analysis_variable_selection/outputs/speed_dating_run"
+output_directory = "/root/data_analysis_variable_selection/outputs/speed_dating_run_wasserstein"
 database_file = "analysis_warehouse.duckdb"
 dataset_name = "speed_dating"
 
@@ -12,11 +12,11 @@ max_records_per_distribution = 500
 random_seed_sampling = 42
 
 [variable_detection]
-method = "mmd"                          # Choose "mmd" or "wasserstein"
+method = "wasserstein"                          # Choose "mmd" or "wasserstein"
 
 [variable_detection.mmd]
-algorithm = "algorithm_one"             # "algorithm_one" or "mmd_cv"
-max_epochs = 100                        # Epochs for ARD weights optimization
+algorithm = "mmd_cv"             # "algorithm_one" or "mmd_cv"
+max_epochs = 9999                        # Epochs for ARD weights optimization
 top_k_fallback = 5
 learning_rate = 0.01
 variable_detection_approach = "hist_based"

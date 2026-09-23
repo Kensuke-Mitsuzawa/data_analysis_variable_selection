@@ -1,0 +1,54 @@
+# Speed Dating Experiment Dataset Variable Selection & Analysis Configuration
+
+[project]
+output_directory = "/root/data_analysis_variable_selection/outputs/speed_dating_run_mmd_cv"
+database_file = "analysis_warehouse.duckdb"
+dataset_name = "speed_dating"
+
+[dataset.speed_dating]
+raw_data_path = "/root/data_analysis_variable_selection/data/speed_dating_raw.csv"
+url_download = "https://www.kaggle.com/datasets/annavictoria/speed-dating-experiment"
+max_records_per_distribution = 500
+random_seed_sampling = 42
+
+[variable_detection]
+method = "mmd"                          # Choose "mmd" or "wasserstein"
+
+[variable_detection.mmd]
+algorithm = "mmd_cv"             # "algorithm_one" or "mmd_cv"
+max_epochs = 9999                        # Epochs for ARD weights optimization
+top_k_fallback = 5
+learning_rate = 0.01
+variable_detection_approach = "hist_based"
+threshold_weights = 0.1
+random_seed = 42
+
+# device option
+device = "cuda"                   # Use NVIDIA GPU ("cuda")
+use_fused_kernel = true           # Enable fused Triton CUDA kernel for speed
+# Concurrency and distributed options
+is_use_local_dask_cluster = true  # Launches local concurrent Dask workers
+dask_n_workers = 4                # Number of Dask worker processes (configurable)
+dask_threads_per_worker = 2       # Threads per Dask worker (configurable)
+
+
+[variable_detection.wasserstein]
+distributed_backend = "single"          # "single", "joblib", or "dask"
+variable_detection_approach = "hist_based"
+threshold_weights = 0.1
+top_k_fallback = 5
+
+[variable_analysis]
+correlation_method = "pearson"          # "pearson" or "graphical_lasso"
+correlation_threshold = 0.2
+num_clusters = 5
+sample_scope = "subset"                 # "subset" (default) or "whole"
+
+[report]
+report_title = "Speed Dating Experiment Variable Selection Analysis Report"
+dataset_report_title = "Speed Dating Experiment Exploratory & Statistical Report"
+sample_scope = "whole"                  # "whole" (default) or "subset"
+export_dataset_report = true
+export_excel = true
+export_plots = true
+export_markdown = true

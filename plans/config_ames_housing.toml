@@ -1,7 +1,7 @@
 # Ames Housing Dataset Variable Selection & Analysis Configuration
 
 [project]
-output_directory = "/root/project-data-analysis-variable-selection/outputs/ames_housing_run"
+output_directory = "/root/project-data-analysis-variable-selection/outputs/ames_housing_run_mmd_cv"
 database_file = "analysis_warehouse.duckdb"
 dataset_name = "ames_housing"
 
