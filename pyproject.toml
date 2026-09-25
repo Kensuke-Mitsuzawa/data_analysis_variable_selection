@@ -8,10 +8,14 @@ authors = [
 ]
 requires-python = ">=3.9"
 dependencies = [
+    "datasets>=2.14.0",
     "duckdb>=1.4.5",
     "mmd-tst-variable-detector",
     "openpyxl>=3.1.5",
+    "sentence-transformers>=5.1.2",
+    "transformers<4.48.0",
     "typer>=0.23.2",
+    "vec2text>=0.0.13",
 ]
 
 [project.optional-dependencies]
